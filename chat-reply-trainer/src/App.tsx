@@ -16,7 +16,7 @@ import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
 
   // Load targets on mount
@@ -194,6 +194,7 @@ function AppContent() {
             sessions={state.sessions}
             onSelectSession={switchSession}
             onCreateSession={createNewSession}
+            onDeleteSession={deleteSession}
           />
           <ContextBar analysis={state.currentAnalysis} />
 

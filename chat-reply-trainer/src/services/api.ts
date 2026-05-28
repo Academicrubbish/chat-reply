@@ -54,6 +54,9 @@ export const createSession = (targetId: string) =>
 export const getSessionMessages = (sessionId: string) =>
   request<any[]>(`/sessions/${sessionId}/messages`);
 
+export const deleteSession = (sessionId: string) =>
+  request<{ success: boolean }>(`/sessions/${sessionId}`, { method: 'DELETE' });
+
 // AI Generate
 export const generateReply = (sessionId: string, herMessage: string) =>
   request<GenerateResponse>(`/sessions/${sessionId}/generate`, {

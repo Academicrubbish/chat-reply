@@ -1,6 +1,6 @@
 import React from 'react';
-import { Button, Progress, Select, Space } from 'antd';
-import { PlusOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Button, Progress, Select, Space, Popconfirm } from 'antd';
+import { PlusOutlined, UnorderedListOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { AISession } from '../types';
 
 interface SessionBarProps {
@@ -8,6 +8,7 @@ interface SessionBarProps {
   sessions: AISession[];
   onSelectSession: (id: string) => void;
   onCreateSession: () => void;
+  onDeleteSession: (id: string) => void;
 }
 
 const SessionBar: React.FC<SessionBarProps> = ({
@@ -15,6 +16,7 @@ const SessionBar: React.FC<SessionBarProps> = ({
   sessions,
   onSelectSession,
   onCreateSession,
+  onDeleteSession,
 }) => {
   const currentIndex = session
     ? sessions.findIndex((s) => s.id === session.id)
@@ -36,7 +38,8 @@ const SessionBar: React.FC<SessionBarProps> = ({
         </span>
       </Space>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap' }}>上下文</span>
         <Progress
           percent={contextPercentage}
           size="small"
@@ -63,6 +66,18 @@ const SessionBar: React.FC<SessionBarProps> = ({
         <Button size="small" icon={<PlusOutlined />} onClick={onCreateSession}>
           新窗口
         </Button>
+        {session && (
+          <Popconfirm
+            title="确定删除该窗口？"
+            description="窗口内的对话记录将一并删除"
+            onConfirm={() => onDeleteSession(session.id)}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        )}
       </Space>
     </div>
   );

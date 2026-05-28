@@ -170,6 +170,7 @@ interface AppContextValue {
   sendCustomReply: (text: string) => Promise<void>;
   createNewSession: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -272,6 +273,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (heartbeatTimer) clearTimeout(heartbeatTimer);
             dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage });
             loadSessionAiMessages(sessionId, dispatch);
+            // Refresh sessions to update context_tokens in SessionBar
+            if (state.currentTargetId) {
+              api.getSessions(state.currentTargetId).then(sessions => {
+                dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: sessionId });
+              });
+            }
             break;
           case 'error':
             clearTimeout(analyzeTimer);
@@ -338,10 +345,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await loadSessionAiMessages(sessionId, dispatch);
   };
 
+  const deleteSession = async (sessionId: string) => {
+    if (!state.currentTargetId) return;
+    await api.deleteSession(sessionId);
+    const sessions = await api.getSessions(state.currentTargetId);
+    const activeSession = sessions.find(s => s.is_active === 1);
+    dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: activeSession?.id || null });
+    if (activeSession) {
+      await loadSessionAiMessages(activeSession.id, dispatch);
+    } else {
+      dispatch({ type: 'SET_AI_MESSAGES', aiMessages: [] });
+    }
+  };
+
   return (
     <AppContext.Provider value={{
       state, dispatch, selectTarget, sendHerMessage, triggerAI,
-      selectReplyAction, sendCustomReply, createNewSession, switchSession,
+      selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
     }}>
       {children}
     </AppContext.Provider>

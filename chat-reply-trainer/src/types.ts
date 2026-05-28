@@ -113,7 +113,7 @@ export type AppAction =
   | { type: 'GENERATE_FAILURE'; error: string }
   | { type: 'SELECT_REPLY'; message: ChatMessage }
   | { type: 'CUSTOM_REPLY'; message: ChatMessage }
-  | { type: 'UPDATE_SESSIONS'; sessions: AISession[]; currentSessionId: string }
+  | { type: 'UPDATE_SESSIONS'; sessions: AISession[]; currentSessionId: string | null }
   | { type: 'SET_PLAN'; plan: { goal: string; nextStep: string } }
   | { type: 'SET_ERROR'; error: string | null }
   | { type: 'OPEN_MODAL'; target?: ChatTarget | null }

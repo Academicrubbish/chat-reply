@@ -141,6 +141,22 @@ app.get('/api/sessions/:sessionId/messages', (req: Request, res: Response) => {
   res.json(db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(req.params.sessionId));
 });
 
+app.delete('/api/sessions/:sessionId', (req: Request, res: Response) => {
+  const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
+  if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+  db.transaction(() => {
+    db.prepare('DELETE FROM ai_messages WHERE session_id = ?').run(req.params.sessionId);
+    db.prepare('DELETE FROM ai_sessions WHERE id = ?').run(req.params.sessionId);
+    if (session.is_active === 1) {
+      const latest = db.prepare('SELECT id FROM ai_sessions WHERE target_id = ? ORDER BY created_at DESC LIMIT 1').get(session.target_id) as any;
+      if (latest) {
+        db.prepare('UPDATE ai_sessions SET is_active = 1 WHERE id = ?').run(latest.id);
+      }
+    }
+  })();
+  res.json({ success: true });
+});
+
 // ===== AI Generate Core =====
 app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response) => {
   try {
@@ -185,9 +201,11 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${herMessage}` });
 
-    // Estimate tokens
+    // Estimate tokens: byte-based estimation handles mixed CJK/English well
+    // UTF-8: CJK = 3 bytes/char (~1.5 tokens), ASCII = 1 byte/char (~0.25 tokens)
+    // Empirically ~2 bytes per token is a good middle ground
     const totalText = conversationMessages.map(m => m.content).join('');
-    const estimatedTokens = Math.ceil(totalText.length * 2);
+    const estimatedTokens = Math.ceil(Buffer.byteLength(totalText, 'utf-8') / 2);
 
     // SSE headers
     res.writeHead(200, {
