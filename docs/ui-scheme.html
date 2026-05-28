@@ -1,0 +1,1924 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>聊天回复训练器 - UI方案 v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f7f8fa;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ===== 顶部标题栏 ===== */
+  .top-bar {
+    background: #ffffff;
+    border-bottom: 1px solid #e8e8e8;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    height: 56px;
+  }
+  .top-bar .logo {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 16px;
+    flex-shrink: 0;
+  }
+  .top-bar .title-group {
+    display: flex; flex-direction: column;
+  }
+  .top-bar h1 {
+    font-size: 16px; font-weight: 600; color: #1a1a1a; line-height: 1.2;
+  }
+  .top-bar .subtitle {
+    font-size: 11px; color: #999; margin-top: 1px;
+  }
+
+  /* 顶部栏 - 聊天对象选择器 */
+  .top-bar .spacer { flex: 1; }
+  .target-selector {
+    position: relative;
+  }
+  .target-btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 13px; color: #333;
+  }
+  .target-btn:hover { background: #eee; border-color: #ccc; }
+  .target-btn .target-avatar {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f48fb1, #f06292);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 600;
+  }
+  .target-btn .arrow {
+    font-size: 10px; color: #999; transition: transform 0.2s;
+  }
+  .target-btn.open .arrow { transform: rotate(180deg); }
+
+  /* 下拉列表 */
+  .target-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 260px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    z-index: 200;
+    display: none;
+    overflow: hidden;
+  }
+  .target-dropdown.show { display: block; }
+  .target-dropdown .dropdown-header {
+    padding: 12px 16px 8px;
+    font-size: 12px; color: #999; font-weight: 500;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .target-dropdown .target-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .target-dropdown .target-item:hover { background: #f5f7fa; }
+  .target-dropdown .target-item.active { background: #e8f0fe; }
+  .target-dropdown .target-item .item-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 13px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .target-dropdown .target-item .item-info {
+    flex: 1; min-width: 0;
+  }
+  .target-dropdown .target-item .item-name {
+    font-size: 13px; font-weight: 600; color: #333;
+  }
+  .target-dropdown .target-item .item-desc {
+    font-size: 11px; color: #999; margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .target-dropdown .target-item .item-msgs {
+    font-size: 11px; color: #bbb; flex-shrink: 0;
+  }
+  .target-dropdown .dropdown-divider {
+    height: 1px; background: #f0f0f0; margin: 4px 0;
+  }
+  .target-dropdown .dropdown-action {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 13px; font-weight: 500; color: #3b5998;
+    transition: background 0.15s;
+  }
+  .target-dropdown .dropdown-action:hover { background: #f5f7fa; }
+  .target-dropdown .dropdown-action .plus-icon {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    border: 1.5px dashed #3b5998;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+
+  /* ===== 主布局 ===== */
+  .main-layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ===== 左侧面板：AI Agent 控制台 ===== */
+  .left-panel {
+    width: 70%;
+    min-width: 600px;
+    background: #ffffff;
+    border-right: 1px solid #e8e8e8;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* -- 人设卡片 -- */
+  .person-card {
+    padding: 14px 20px;
+    background: #fafbff;
+    border-bottom: 1px solid #ebeef5;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .person-avatar {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f48fb1, #f06292);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 17px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .person-info {
+    flex: 1; min-width: 0;
+  }
+  .person-name-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+  }
+  .person-name {
+    font-size: 15px; font-weight: 600; color: #1a1a1a;
+  }
+  .person-edit-btn {
+    font-size: 12px; color: #3b5998; cursor: pointer;
+    background: none; border: none; padding: 2px 6px;
+    border-radius: 4px; transition: background 0.15s;
+  }
+  .person-edit-btn:hover { background: #e8f0fe; }
+  .person-tags {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .person-tag {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px; font-weight: 500;
+    background: #f0f2f5; color: #666;
+  }
+  .person-tag.highlight {
+    background: #fff3e0; color: #e65100;
+  }
+
+  /* -- AI 辅导窗口管理条 -- */
+  .session-bar {
+    padding: 8px 20px;
+    background: #fff;
+    border-bottom: 1px solid #ebeef5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .session-info {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .session-label {
+    font-size: 12px; color: #999;
+  }
+  .session-current {
+    font-size: 13px; font-weight: 700; color: #3b5998;
+    background: #e8f0fe;
+    padding: 2px 10px;
+    border-radius: 10px;
+  }
+  .session-rounds {
+    font-size: 11px; color: #bbb;
+  }
+  .session-rounds .count {
+    color: #e65100; font-weight: 600;
+  }
+  .session-actions {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .btn-session-list {
+    padding: 4px 10px;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-session-list:hover { background: #eee; }
+  .btn-new-session {
+    padding: 4px 12px;
+    background: #fff;
+    border: 1px dashed #3b5998;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #3b5998;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-new-session:hover {
+    background: #3b5998;
+    color: #fff;
+    border-style: solid;
+  }
+
+  /* 窗口历史下拉 */
+  .session-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    width: 220px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+    z-index: 150;
+    display: none;
+    overflow: hidden;
+  }
+  .session-dropdown.show { display: block; }
+  .session-dropdown .sd-header {
+    padding: 8px 12px 6px;
+    font-size: 11px; color: #999; font-weight: 500;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .session-dropdown .sd-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 12px;
+  }
+  .session-dropdown .sd-item:hover { background: #f5f7fa; }
+  .session-dropdown .sd-item.active { background: #e8f0fe; }
+  .sd-item .sd-name { font-weight: 600; color: #333; }
+  .sd-item .sd-meta { font-size: 11px; color: #999; }
+  .sd-item.active .sd-name { color: #3b5998; }
+
+  /* -- 情境状态栏 -- */
+  .context-bar {
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #f0f4ff, #e8eeff);
+    border-bottom: 1px solid #e0e6f0;
+  }
+  .context-bar .tags {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;
+  }
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px;
+    border-radius: 16px;
+    font-size: 11px; font-weight: 500;
+  }
+  .tag-stage { background: #e8f5e9; color: #2e7d32; }
+  .tag-scene { background: #fff3e0; color: #e65100; }
+  .tag-signal { background: #e3f2fd; color: #1565c0; }
+  .tag-strategy { background: #fce4ec; color: #c62828; }
+
+  .favorability {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .favorability-label {
+    font-size: 11px; color: #666; white-space: nowrap;
+  }
+  .favorability-bar {
+    flex: 1; height: 5px;
+    background: #e0e0e0; border-radius: 3px;
+    overflow: hidden;
+  }
+  .favorability-fill {
+    height: 100%; width: 65%;
+    background: linear-gradient(90deg, #66bb6a, #43a047);
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+  .favorability-value {
+    font-size: 11px; color: #2e7d32; font-weight: 600;
+  }
+
+  /* -- Tab 切换 -- */
+  .tab-bar {
+    display: flex;
+    border-bottom: 2px solid #f0f0f0;
+    padding: 0 20px;
+  }
+  .tab-item {
+    padding: 10px 18px;
+    font-size: 13px; font-weight: 500;
+    color: #999;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+  }
+  .tab-item.active {
+    color: #3b5998;
+    border-bottom-color: #3b5998;
+  }
+  .tab-item:hover { color: #3b5998; }
+
+  /* -- Tab 内容 -- */
+  .tab-content {
+    padding: 14px 20px;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* 信号分析 */
+  .signal-card {
+    background: #fafbff;
+    border: 1px solid #e8ecf4;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .signal-card h4 {
+    font-size: 12px; color: #888; margin-bottom: 8px; font-weight: 500;
+  }
+  .signal-card p {
+    font-size: 13px; color: #333; line-height: 1.6;
+  }
+  .emotion-tags {
+    display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+  }
+  .emotion-tag {
+    padding: 2px 10px; border-radius: 10px; font-size: 11px;
+  }
+  .emotion-positive { background: #e8f5e9; color: #2e7d32; }
+  .emotion-neutral { background: #fff8e1; color: #f57f17; }
+  .emotion-test { background: #e3f2fd; color: #1565c0; }
+
+  .tip-box {
+    background: #fff8e1;
+    border-left: 3px solid #ffc107;
+    border-radius: 0 6px 6px 0;
+    padding: 10px 12px;
+    margin-top: 10px;
+    font-size: 12px; color: #6d4c00; line-height: 1.5;
+  }
+  .tip-box::before { content: "💡 "; }
+
+  /* 策略建议 */
+  .strategy-highlight {
+    background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .strategy-highlight .name {
+    font-size: 16px; font-weight: 700; color: #3b5998;
+  }
+  .strategy-highlight .desc {
+    font-size: 12px; color: #666; margin-top: 4px;
+  }
+  .strategy-list {
+    list-style: none;
+  }
+  .strategy-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 12px; color: #555;
+  }
+  .strategy-list li:last-child { border-bottom: none; }
+
+  /* -- 回复选项浮层弹窗（从底部弹出） -- */
+  .reply-popup-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 300;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+  }
+  .reply-popup-overlay.show { display: flex; }
+
+  .reply-popup {
+    width: 44%;
+    min-width: 420px;
+    max-width: 560px;
+    background: #fff;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
+    max-height: 70vh;
+    overflow-y: auto;
+    animation: slideUp 0.3s ease;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .reply-popup-header {
+    padding: 16px 20px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #f0f0f0;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    border-radius: 16px 16px 0 0;
+    z-index: 1;
+  }
+  .reply-popup-header h3 {
+    font-size: 14px; color: #333;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .reply-popup-header h3::before {
+    content: ""; display: inline-block;
+    width: 3px; height: 14px; background: #3b5998; border-radius: 2px;
+  }
+  .reply-popup-close {
+    width: 28px; height: 28px;
+    border: none; background: #f5f5f5;
+    border-radius: 50%; cursor: pointer;
+    font-size: 14px; color: #999;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .reply-popup-close:hover { background: #eee; color: #333; }
+
+  .reply-popup-body {
+    padding: 16px 20px 20px;
+  }
+
+  .reply-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .reply-card {
+    background: #ffffff;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 10px;
+    padding: 12px 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .reply-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    border-color: #3b5998;
+  }
+  .reply-card.selected {
+    border-color: #3b5998;
+    background: #f0f4ff;
+    box-shadow: 0 2px 8px rgba(59,89,152,0.15);
+  }
+  .reply-card .strategy-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px; font-weight: 600;
+    margin-bottom: 7px;
+    align-self: flex-start;
+  }
+  .label-humor { background: #fff3e0; color: #e65100; }
+  .label-balance { background: #e8f5e9; color: #2e7d32; }
+  .label-magic { background: #e3f2fd; color: #1565c0; }
+  .label-conflict { background: #fce4ec; color: #c62828; }
+  .label-safe { background: #f3e5f5; color: #6a1b9a; }
+
+  .reply-card .reply-text {
+    font-size: 13.5px; font-weight: 600; color: #1a1a1a;
+    line-height: 1.5; margin-bottom: 5px;
+    flex: 1;
+  }
+  .reply-card .reply-reason {
+    font-size: 11px; color: #999; line-height: 1.4;
+  }
+
+  /* -- 自定义回复区 -- */
+  .custom-reply {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #ddd;
+  }
+  .custom-reply-label {
+    font-size: 11px; color: #999; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .custom-reply-input {
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  .custom-reply-input textarea {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+    min-height: 36px;
+    max-height: 80px;
+    outline: none;
+    background: #fff;
+    transition: border-color 0.2s;
+  }
+  .custom-reply-input textarea:focus {
+    border-color: #3b5998;
+  }
+  .custom-reply-input textarea::placeholder {
+    color: #bbb;
+  }
+  .btn-custom-send {
+    padding: 8px 16px;
+    background: #fff;
+    color: #3b5998;
+    border: 1px solid #3b5998;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .btn-custom-send:hover {
+    background: #3b5998; color: #fff;
+  }
+
+  /* ===== 右侧面板：聊天模拟器（紧凑 30%） ===== */
+  .right-panel {
+    width: 30%;
+    min-width: 320px;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    background: #ededed;
+  }
+
+  /* 聊天 Header */
+  .chat-header {
+    background: #ffffff;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
+  }
+  .chat-header-left {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chat-avatar {
+    width: 34px; height: 34px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #f48fb1, #f06292);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 14px; font-weight: 600;
+  }
+  .chat-name {
+    font-size: 14px; font-weight: 600; color: #1a1a1a;
+  }
+  .online-status {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 10px; color: #999; margin-top: 1px;
+  }
+  .online-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: #4caf50;
+  }
+  .chat-header-right {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .btn-ai-assist {
+    padding: 5px 12px;
+    background: linear-gradient(135deg, #3b5998, #4a6fb5);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    display: flex; align-items: center; gap: 4px;
+    box-shadow: 0 2px 6px rgba(59,89,152,0.25);
+  }
+  .btn-ai-assist:hover {
+    background: linear-gradient(135deg, #2d4373, #3b5998);
+    box-shadow: 0 4px 10px rgba(59,89,152,0.35);
+  }
+  .btn-ai-assist .ai-icon {
+    font-size: 12px;
+  }
+  .btn-reset {
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background: #fff;
+    color: #666;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-reset:hover {
+    background: #f5f5f5; border-color: #bbb;
+  }
+
+  /* 消息流 */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* 系统消息 */
+  .msg-system {
+    text-align: center;
+    font-size: 11px; color: #999;
+    padding: 3px 0;
+  }
+
+  /* 消息行 */
+  .msg-row {
+    display: flex;
+    gap: 6px;
+    max-width: 85%;
+  }
+  .msg-row.her { align-self: flex-start; }
+  .msg-row.me { align-self: flex-end; flex-direction: row-reverse; }
+
+  .msg-avatar {
+    width: 30px; height: 30px;
+    border-radius: 5px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600; color: #fff;
+  }
+  .msg-row.her .msg-avatar {
+    background: linear-gradient(135deg, #f48fb1, #f06292);
+  }
+  .msg-row.me .msg-avatar {
+    background: linear-gradient(135deg, #66bb6a, #43a047);
+  }
+
+  .msg-bubble {
+    padding: 8px 11px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .msg-row.her .msg-bubble {
+    background: #ffffff;
+    color: #1a1a1a;
+    border-top-left-radius: 3px;
+  }
+  .msg-row.me .msg-bubble {
+    background: #95ec69;
+    color: #1a1a1a;
+    border-top-right-radius: 3px;
+  }
+
+  /* 消息来源标记 */
+  .msg-source {
+    font-size: 9px; color: #bbb; margin-top: 2px;
+    text-align: right;
+  }
+  .msg-row.her .msg-source { text-align: left; }
+
+  /* 输入区 */
+  .chat-input-area {
+    background: #f7f7f7;
+    border-top: 1px solid #e0e0e0;
+    padding: 8px 10px;
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .chat-input-area textarea {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+    min-height: 34px;
+    max-height: 80px;
+    outline: none;
+    background: #fff;
+    transition: border-color 0.2s;
+  }
+  .chat-input-area textarea:focus {
+    border-color: #3b5998;
+  }
+  .btn-primary {
+    padding: 8px 14px;
+    background: #3b5998;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s;
+  }
+  .btn-primary:hover { background: #2d4373; }
+
+  /* 等待提示 */
+  .waiting-hint {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 8px;
+    font-size: 11px; color: #3b5998;
+    background: #e8f0fe;
+    border-top: 1px solid #d0dff5;
+  }
+  .waiting-hint.show { display: flex; }
+  .waiting-hint .pulse {
+    width: 6px; height: 6px;
+    background: #3b5998;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+
+  /* ===== 新建聊天对象 Modal ===== */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    backdrop-filter: blur(2px);
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    width: 480px;
+    max-width: 90vw;
+    max-height: 85vh;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: modalIn 0.25s ease;
+  }
+  @keyframes modalIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .modal-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .modal-header h2 {
+    font-size: 17px; font-weight: 600; color: #1a1a1a;
+  }
+  .modal-close {
+    width: 30px; height: 30px;
+    border: none; background: #f5f5f5;
+    border-radius: 50%; cursor: pointer;
+    font-size: 16px; color: #999;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .modal-close:hover { background: #eee; color: #333; }
+  .modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .form-group {
+    margin-bottom: 18px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 13px; font-weight: 600; color: #333;
+    margin-bottom: 6px;
+  }
+  .form-group .form-hint {
+    font-size: 11px; color: #999; font-weight: 400; margin-left: 6px;
+  }
+  .form-group input,
+  .form-group textarea {
+    width: 100%;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+    background: #fafafa;
+  }
+  .form-group input:focus,
+  .form-group textarea:focus {
+    border-color: #3b5998;
+    background: #fff;
+  }
+  .form-group textarea {
+    resize: vertical;
+    min-height: 60px;
+    max-height: 120px;
+    line-height: 1.5;
+  }
+  .form-group input::placeholder,
+  .form-group textarea::placeholder {
+    color: #bbb;
+  }
+  .modal-footer {
+    padding: 16px 24px 20px;
+    border-top: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .btn-modal-cancel {
+    padding: 9px 20px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-modal-cancel:hover { background: #eee; }
+  .btn-modal-save {
+    padding: 9px 24px;
+    background: #3b5998;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-modal-save:hover { background: #2d4373; }
+
+  /* ===== 方案标签 ===== */
+  .scheme-badge {
+    position: fixed;
+    bottom: 16px; right: 20px;
+    background: #3b5998;
+    color: #fff;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(59,89,152,0.3);
+  }
+
+  /* ===== AgentSteps AI工作步骤进度 ===== */
+  .agent-steps {
+    padding: 10px 20px;
+    background: #fafbff;
+    border-bottom: 1px solid #ebeef5;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .agent-steps .step-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .step-row .step-icon {
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 13px;
+  }
+  .step-row.step-done .step-icon { color: #43a047; }
+  .step-row.step-done .step-text { color: #2e7d32; }
+  .step-row.step-active .step-icon { color: #1565c0; }
+  .step-row.step-active .step-text { color: #1565c0; }
+  .step-row.step-active .step-icon {
+    animation: stepPulse 1.2s infinite;
+  }
+  @keyframes stepPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .step-row.step-pending .step-icon { color: #bdbdbd; }
+  .step-row.step-pending .step-text { color: #bdbdbd; }
+
+  /* ===== PlanCard 对话策略计划卡片 ===== */
+  .plan-card {
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #f3e5f5, #e8eeff);
+    border-bottom: 1px solid #e0d6f0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .plan-card .plan-content {
+    flex: 1;
+    min-width: 0;
+  }
+  .plan-card .plan-goal {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4a148c;
+    margin-bottom: 3px;
+  }
+  .plan-card .plan-next {
+    font-size: 11px;
+    color: #6a1b9a;
+    line-height: 1.4;
+  }
+  .plan-card .plan-edit-btn {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid #ce93d8;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .plan-card .plan-edit-btn:hover {
+    background: #ce93d8;
+    color: #fff;
+  }
+
+  /* ===== Context Usage 上下文用量条 ===== */
+  .context-usage {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+  }
+  .context-usage-label {
+    font-size: 11px;
+    color: #999;
+    white-space: nowrap;
+  }
+  .context-usage-bar {
+    width: 80px;
+    height: 4px;
+    background: #e0e0e0;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .context-usage-fill {
+    height: 100%;
+    width: 40%;
+    background: linear-gradient(90deg, #66bb6a, #43a047);
+    border-radius: 2px;
+    transition: width 0.5s ease, background 0.3s;
+  }
+  .context-usage-fill.warning {
+    background: linear-gradient(90deg, #ffa726, #ef6c00);
+  }
+  .context-usage-value {
+    font-size: 11px;
+    color: #666;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .context-usage-fill.warning + .context-usage-value {
+    color: #ef6c00;
+    font-weight: 600;
+  }
+  .context-usage-warning {
+    font-size: 10px;
+    color: #ef6c00;
+    font-weight: 500;
+    white-space: nowrap;
+    display: none;
+  }
+  .context-usage-fill.warning ~ .context-usage-warning {
+    display: inline;
+  }
+
+  /* ===== Reply Actions 重新生成/指定策略 ===== */
+  .reply-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .btn-regenerate,
+  .btn-strategy {
+    padding: 5px 14px;
+    background: transparent;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-regenerate:hover,
+  .btn-strategy:hover {
+    border-color: #3b5998;
+    color: #3b5998;
+    background: #f0f4ff;
+  }
+
+  /* ===== Reply Feedback 回复卡片反馈按钮 ===== */
+  .reply-feedback {
+    display: inline-flex;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .btn-thumb {
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .btn-thumb:hover {
+    background: #f0f0f0;
+  }
+  .btn-thumb.up-active {
+    background: #e8f5e9;
+  }
+  .btn-thumb.down-active {
+    background: #fce4ec;
+  }
+
+  /* ===== 交互流程说明 ===== */
+  .flow-notes {
+    display: none; /* 方案文档中展示，实际产品中隐藏 */
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部标题栏 ===== -->
+<div class="top-bar">
+  <div class="logo">AI</div>
+  <div class="title-group">
+    <h1>聊天回复训练器</h1>
+    <div class="subtitle">Chat Reply Trainer · AI Agent 辅助沟通</div>
+  </div>
+  <div class="spacer"></div>
+
+  <!-- 聊天对象选择器 -->
+  <div class="target-selector" id="targetSelector">
+    <div class="target-btn" id="targetBtn" onclick="toggleDropdown()">
+      <div class="target-avatar">美</div>
+      <span id="targetName">小美</span>
+      <span class="arrow">▼</span>
+    </div>
+    <div class="target-dropdown" id="targetDropdown">
+      <div class="dropdown-header">聊天对象</div>
+      <div class="target-item active" onclick="switchTarget('小美', this)">
+        <div class="item-avatar" style="background:linear-gradient(135deg,#f48fb1,#f06292)">美</div>
+        <div class="item-info">
+          <div class="item-name">小美</div>
+          <div class="item-desc">销售 · 爱旅行 · 猫奴</div>
+        </div>
+        <div class="item-msgs">12条</div>
+      </div>
+      <div class="target-item" onclick="switchTarget('小林', this)">
+        <div class="item-avatar" style="background:linear-gradient(135deg,#81d4fa,#29b6f6)">林</div>
+        <div class="item-info">
+          <div class="item-name">小林</div>
+          <div class="item-desc">设计师 · 喜欢摄影 · 宅女</div>
+        </div>
+        <div class="item-msgs">5条</div>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-action" onclick="openModal()">
+        <div class="plus-icon">+</div>
+        <span>新建聊天对象</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 主布局 ===== -->
+<div class="main-layout">
+
+  <!-- ===== 左侧面板：AI Agent 控制台 ===== -->
+  <div class="left-panel">
+
+    <!-- 人设卡片 -->
+    <div class="person-card">
+      <div class="person-avatar">美</div>
+      <div class="person-info">
+        <div class="person-name-row">
+          <span class="person-name">小美</span>
+          <button class="person-edit-btn" onclick="openModal()">编辑人设</button>
+        </div>
+        <div class="person-tags">
+          <span class="person-tag">做销售</span>
+          <span class="person-tag">爱旅行</span>
+          <span class="person-tag">猫奴</span>
+          <span class="person-tag highlight">朋友介绍认识</span>
+          <span class="person-tag">性格开朗</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 辅导窗口管理条 -->
+    <div class="session-bar">
+      <div class="session-info">
+        <span class="session-label">辅导窗口</span>
+        <span class="session-current">#3</span>
+        <span class="session-rounds">本轮 <span class="count">8</span> 次对话</span>
+        <div class="context-usage">
+          <span class="context-usage-label">上下文</span>
+          <div class="context-usage-bar">
+            <div class="context-usage-fill"></div>
+          </div>
+          <span class="context-usage-value">40%</span>
+          <span class="context-usage-warning">建议新建窗口</span>
+        </div>
+      </div>
+      <div class="session-actions" style="position:relative">
+        <button class="btn-session-list" onclick="toggleSessionList()">窗口列表</button>
+        <button class="btn-new-session" onclick="createSession()">+ 新窗口</button>
+        <!-- 窗口历史下拉 -->
+        <div class="session-dropdown" id="sessionDropdown">
+          <div class="sd-header">辅导窗口历史</div>
+          <div class="sd-item active" onclick="switchSession(3, this)">
+            <span class="sd-name">#3 当前</span>
+            <span class="sd-meta">8 轮</span>
+          </div>
+          <div class="sd-item" onclick="switchSession(2, this)">
+            <span class="sd-name">#2</span>
+            <span class="sd-meta">15 轮</span>
+          </div>
+          <div class="sd-item" onclick="switchSession(1, this)">
+            <span class="sd-name">#1</span>
+            <span class="sd-meta">12 轮</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 情境状态栏 -->
+    <div class="context-bar">
+      <div class="tags">
+        <span class="tag tag-stage">💕 暧昧期</span>
+        <span class="tag tag-scene">🌙 深夜聊天</span>
+        <span class="tag tag-signal">🟢 正面无冲突</span>
+        <span class="tag tag-strategy">✨ 魔趣法则</span>
+      </div>
+      <div class="favorability">
+        <span class="favorability-label">好感度</span>
+        <div class="favorability-bar">
+          <div class="favorability-fill"></div>
+        </div>
+        <span class="favorability-value">65%</span>
+      </div>
+    </div>
+
+    <!-- 对话策略计划卡片 -->
+    <div class="plan-card">
+      <div class="plan-content">
+        <div class="plan-goal">🎯 当前目标：升温关系 → 从暧昧期推进到约会</div>
+        <div class="plan-next">📍 下一步：找机会用轻松话题切入，试探线下邀约意愿</div>
+      </div>
+      <button class="plan-edit-btn" title="编辑计划">✏️</button>
+    </div>
+
+    <!-- Tab 切换 -->
+    <div class="tab-bar">
+      <div class="tab-item active" onclick="switchTab('signal')">信号分析</div>
+      <div class="tab-item" onclick="switchTab('strategy')">策略建议</div>
+    </div>
+
+    <!-- AI 工作步骤进度 -->
+    <div class="agent-steps">
+      <div class="step-row step-done">
+        <span class="step-icon">✓</span>
+        <span class="step-text">分析对方消息</span>
+      </div>
+      <div class="step-row step-done">
+        <span class="step-icon">✓</span>
+        <span class="step-text">识别情绪信号</span>
+      </div>
+      <div class="step-row step-active">
+        <span class="step-icon">◐</span>
+        <span class="step-text">匹配策略知识...</span>
+      </div>
+      <div class="step-row step-pending">
+        <span class="step-icon">○</span>
+        <span class="step-text">生成回复选项</span>
+      </div>
+    </div>
+
+    <!-- Tab 内容 -->
+    <div class="tab-content">
+      <!-- 信号分析 -->
+      <div id="tab-signal" class="tab-panel active">
+        <div class="signal-card">
+          <h4>对方上一句话分析</h4>
+          <p>对方用"当牛马"这种自嘲式表达，带有轻松的抱怨情绪，同时"对啊"表示在延续之前的话题，说明她愿意继续交流。</p>
+          <div class="emotion-tags">
+            <span class="emotion-tag emotion-positive">🟢 正面</span>
+            <span class="emotion-tag emotion-neutral">😏 自嘲</span>
+            <span class="emotion-tag emotion-test">💭 延续话题</span>
+          </div>
+        </div>
+        <div class="tip-box">
+          对方在主动制造共同点，这是好感信号，可以适当推进话题
+        </div>
+      </div>
+      <!-- 策略建议 -->
+      <div id="tab-strategy" class="tab-panel">
+        <div class="strategy-highlight">
+          <div class="name">推荐：魔趣法则</div>
+          <div class="desc">具有联系感的夸张行为，制造趣味</div>
+        </div>
+        <ul class="strategy-list">
+          <li>💡 <strong>适用场景：</strong>常规回应、需要制造趣味时</li>
+          <li>🎯 <strong>核心思想：</strong>用夸张但有关联的行为描述来引发好奇心</li>
+          <li>⚡ <strong>建议：</strong>结合对方的"当牛马"话题，制造一个有趣的画面</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 回复选项弹窗（浮层，用户选择后隐藏，空间还给分析区） -->
+    <div class="reply-popup-overlay" id="replyPopup">
+      <div class="reply-popup">
+        <div class="reply-popup-header">
+          <h3>选择回复 或 自定义</h3>
+          <button class="reply-popup-close" onclick="closeReplyPopup()">✕</button>
+        </div>
+        <div class="reply-popup-body">
+          <div class="reply-grid">
+            <div class="reply-card" onclick="selectReply(this)">
+              <span class="strategy-label label-magic">魔趣法则</span>
+              <div class="reply-text">害，我还以为你在雨里狂奔见客户呢，白替你担心了</div>
+              <div class="reply-reason">用幽默包装关心，制造画面感</div>
+              <div class="reply-feedback">
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'up')">👍</button>
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'down')">👎</button>
+              </div>
+            </div>
+
+            <div class="reply-card" onclick="selectReply(this)">
+              <span class="strategy-label label-balance">平衡艺术</span>
+              <div class="reply-text">那心疼你算白心疼了，不过坐电脑前也累吧</div>
+              <div class="reply-reason">关心 + 轻松转折</div>
+              <div class="reply-feedback">
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'up')">👍</button>
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'down')">👎</button>
+              </div>
+            </div>
+
+            <div class="reply-card" onclick="selectReply(this)">
+              <span class="strategy-label label-conflict">扩大冲突</span>
+              <div class="reply-text">牛马？我认识的都是宝马，你是什么马</div>
+              <div class="reply-reason">延续调侃，升级暧昧</div>
+              <div class="reply-feedback">
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'up')">👍</button>
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'down')">👎</button>
+              </div>
+            </div>
+
+            <div class="reply-card" onclick="selectReply(this)">
+              <span class="strategy-label label-safe">安全回复</span>
+              <div class="reply-text">哈哈确实，打工人的宿命</div>
+              <div class="reply-reason">稳妥回应，不犯错</div>
+              <div class="reply-feedback">
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'up')">👍</button>
+                <button class="btn-thumb" onclick="event.stopPropagation();feedback(this, 'down')">👎</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="reply-actions">
+            <button class="btn-regenerate" onclick="regenerate()">🔄 重新生成</button>
+            <button class="btn-strategy">🎯 指定策略 ▼</button>
+          </div>
+
+          <!-- 自定义回复 -->
+          <div class="custom-reply">
+            <div class="custom-reply-label">✏️ 不满意？自己写：</div>
+            <div class="custom-reply-input">
+              <textarea placeholder="输入你想说的话..." rows="1"></textarea>
+              <button class="btn-custom-send" onclick="sendCustomReply()">发送自定义</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 右侧面板：聊天模拟器 ===== -->
+  <div class="right-panel">
+
+    <!-- 聊天 Header -->
+    <div class="chat-header">
+      <div class="chat-header-left">
+        <div class="chat-avatar">美</div>
+        <div>
+          <div class="chat-name">小美</div>
+          <div class="online-status">
+            <span class="online-dot"></span>
+            在线
+          </div>
+        </div>
+      </div>
+      <div class="chat-header-right">
+        <button class="btn-ai-assist" onclick="triggerAI()">
+          <span class="ai-icon">✦</span> AI 辅助
+        </button>
+        <button class="btn-reset">重新开始</button>
+      </div>
+    </div>
+
+    <!-- 消息流 -->
+    <div class="chat-messages">
+      <div class="msg-system">—— 朋友介绍认识 · 第3周 ——</div>
+
+      <div class="msg-row her">
+        <div class="msg-avatar">美</div>
+        <div>
+          <div class="msg-bubble">今天下雨了 你带伞了吗</div>
+          <div class="msg-source">手动输入</div>
+        </div>
+      </div>
+
+      <div class="msg-row me">
+        <div class="msg-avatar">我</div>
+        <div>
+          <div class="msg-bubble">没有 你不是销售吗 肯定淋成落汤鸡了吧</div>
+          <div class="msg-source">AI 建议 · 魔趣法则</div>
+        </div>
+      </div>
+
+      <div class="msg-row her">
+        <div class="msg-avatar">美</div>
+        <div>
+          <div class="msg-bubble">才没有 我在外面跑客户 累死了</div>
+          <div class="msg-source">手动输入</div>
+        </div>
+      </div>
+
+      <div class="msg-row me">
+        <div class="msg-avatar">我</div>
+        <div>
+          <div class="msg-bubble">销售果然是铁打的...</div>
+          <div class="msg-source">自定义回复</div>
+        </div>
+      </div>
+
+      <div class="msg-row her">
+        <div class="msg-avatar">美</div>
+        <div>
+          <div class="msg-bubble">对啊，还是要起来当牛马</div>
+          <div class="msg-source">手动输入</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 等待AI分析提示 -->
+    <div class="waiting-hint show" id="waitingHint">
+      <span class="pulse"></span>
+      <span>点击「AI 辅助」获取回复建议</span>
+    </div>
+
+    <!-- 输入区：输入她的消息 -->
+    <div class="chat-input-area">
+      <textarea id="herMsgInput" placeholder="输入她刚发的消息..." rows="1"></textarea>
+      <button class="btn-primary" onclick="sendHerMessage()">发送</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== 新建聊天对象 Modal ===== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>新建聊天对象</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>她的名字 / 称呼</label>
+        <input type="text" placeholder="例如：小美" />
+      </div>
+      <div class="form-group">
+        <label>认识场景 <span class="form-hint">你们是怎么认识的</span></label>
+        <textarea placeholder="例如：朋友介绍的，第一次见面是在咖啡厅，聊了大概半小时感觉还不错"></textarea>
+      </div>
+      <div class="form-group">
+        <label>朋友圈人设 <span class="form-hint">她的社交媒体风格、性格特点</span></label>
+        <textarea placeholder="例如：经常发旅行照片、晒猫、偶尔发工作吐槽，性格开朗但有点小傲娇"></textarea>
+      </div>
+      <div class="form-group">
+        <label>兴趣爱好</label>
+        <input type="text" placeholder="例如：旅行、摄影、养猫、追剧" />
+      </div>
+      <div class="form-group">
+        <label>近期聊天内容 <span class="form-hint">帮助 AI 推断性格和相处状态</span></label>
+        <textarea placeholder="粘贴你们最近的几条聊天记录，或简要描述最近的聊天氛围" style="min-height:80px"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal-cancel" onclick="closeModal()">取消</button>
+      <button class="btn-modal-save" onclick="saveTarget()">创建并开始聊天</button>
+    </div>
+  </div>
+</div>
+
+<!-- 方案标签 -->
+<div class="scheme-badge">方案 v2.3 · 信号分析全屏 + 回复弹窗浮层 + Harness机制</div>
+
+<script>
+// ===== Tab 切换 =====
+function switchTab(tab) {
+  document.querySelectorAll('.tab-item').forEach((el, i) => {
+    el.classList.toggle('active', (tab === 'signal' && i === 0) || (tab === 'strategy' && i === 1));
+  });
+  document.getElementById('tab-signal').classList.toggle('active', tab === 'signal');
+  document.getElementById('tab-strategy').classList.toggle('active', tab === 'strategy');
+}
+
+// ===== 回复弹窗控制 =====
+function showReplyPopup() {
+  document.getElementById('replyPopup').classList.add('show');
+}
+function closeReplyPopup() {
+  document.getElementById('replyPopup').classList.remove('show');
+  document.querySelectorAll('.reply-card').forEach(c => c.classList.remove('selected'));
+}
+// 点击遮罩关闭
+document.getElementById('replyPopup').addEventListener('click', function(e) {
+  if (e.target === this) closeReplyPopup();
+});
+
+// ===== 回复选择 =====
+function selectReply(card) {
+  document.querySelectorAll('.reply-card').forEach(c => {
+    c.classList.remove('selected');
+  });
+  card.classList.add('selected');
+}
+
+// ===== 自定义回复发送 =====
+function sendCustomReply() {
+  const textarea = document.querySelector('.custom-reply-input textarea');
+  const text = textarea.value.trim();
+  if (!text) return;
+  addMessage('me', text, '自定义回复');
+  textarea.value = '';
+  document.querySelectorAll('.reply-card').forEach(c => c.classList.remove('selected'));
+  closeReplyPopup(); // 发送后关闭弹窗
+}
+
+// ===== 发送她的消息 =====
+function sendHerMessage() {
+  const input = document.getElementById('herMsgInput');
+  const text = input.value.trim();
+  if (!text) return;
+  addMessage('her', text, '手动输入');
+  input.value = '';
+  // 显示等待提示
+  document.getElementById('waitingHint').classList.add('show');
+}
+
+// ===== 添加消息到聊天区 =====
+function addMessage(role, text, source) {
+  const container = document.querySelector('.chat-messages');
+  const name = role === 'her' ? '美' : '我';
+  const row = document.createElement('div');
+  row.className = `msg-row ${role}`;
+  row.innerHTML = `
+    <div class="msg-avatar">${name}</div>
+    <div>
+      <div class="msg-bubble">${text}</div>
+      <div class="msg-source">${source}</div>
+    </div>
+  `;
+  container.appendChild(row);
+  container.scrollTop = container.scrollHeight;
+  // 隐藏等待提示
+  document.getElementById('waitingHint').classList.remove('show');
+}
+
+// ===== AI 辅助触发 =====
+function triggerAI() {
+  document.getElementById('waitingHint').classList.remove('show');
+  // 实际产品中：1.调API 2.更新分析内容 3.弹出回复选项
+  // 演示：直接弹出回复选项弹窗
+  showReplyPopup();
+}
+
+// ===== AI 辅导窗口管理 =====
+function toggleSessionList() {
+  document.getElementById('sessionDropdown').classList.toggle('show');
+}
+function switchSession(num, el) {
+  document.querySelectorAll('.sd-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelector('.session-current').textContent = '#' + num;
+  document.getElementById('sessionDropdown').classList.remove('show');
+  // 实际产品中：加载该窗口的 AI 对话历史
+}
+function createSession() {
+  const items = document.querySelectorAll('.sd-item');
+  const newNum = items.length + 1;
+  document.querySelector('.session-current').textContent = '#' + newNum;
+  document.querySelector('.session-rounds .count').textContent = '0';
+  items.forEach(i => i.classList.remove('active'));
+  // 实际产品中：创建新的 AI 辅导对话窗口，上下文重置
+  alert('新建辅导窗口 #' + newNum + '\n\n实际产品中：\n1. 创建新的 AI 对话上下文\n2. 只携带聊天记录+人设，不携带之前的 AI 对话历史\n3. 左侧面板重置为空白状态');
+}
+
+// ===== 下拉菜单 =====
+function toggleDropdown() {
+
+  const dropdown = document.getElementById('targetDropdown');
+  const btn = document.getElementById('targetBtn');
+  dropdown.classList.toggle('show');
+  btn.classList.toggle('open');
+}
+function switchTarget(name, el) {
+  document.getElementById('targetName').textContent = name;
+  document.querySelectorAll('.target-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  toggleDropdown();
+}
+
+// ===== Modal =====
+function openModal() {
+  document.getElementById('modalOverlay').classList.add('show');
+  document.getElementById('targetDropdown').classList.remove('show');
+  document.getElementById('targetBtn').classList.remove('open');
+}
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+function saveTarget() {
+  closeModal();
+  // 实际产品中保存到存储
+}
+
+// 点击外部关闭下拉
+document.addEventListener('click', function(e) {
+  const selector = document.getElementById('targetSelector');
+  if (!selector.contains(e.target)) {
+    document.getElementById('targetDropdown').classList.remove('show');
+    document.getElementById('targetBtn').classList.remove('open');
+  }
+  // 关闭窗口历史下拉
+  const sessionActions = document.querySelector('.session-actions');
+  if (sessionActions && !sessionActions.contains(e.target)) {
+    document.getElementById('sessionDropdown').classList.remove('show');
+  }
+});
+// 点击 modal 背景关闭
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ===== 回复反馈按钮 =====
+function feedback(btn, type) {
+  const feedbackDiv = btn.parentElement;
+  const allBtns = feedbackDiv.querySelectorAll('.btn-thumb');
+  allBtns.forEach(b => {
+    b.classList.remove('up-active', 'down-active');
+  });
+  if (type === 'up') {
+    btn.classList.add('up-active');
+  } else {
+    btn.classList.add('down-active');
+  }
+}
+
+// ===== 重新生成回复 =====
+function regenerate() {
+  alert('重新生成回复...\n\n实际产品中：\n1. 重新调用 AI API 生成一组新的回复选项\n2. 保留当前对话上下文，避免重复');
+}
+</script>
+
+<!--
+================================================================================
+  UI 方案 v2 设计说明
+================================================================================
+
+## 与 v1 的主要变化
+
+### 1. 新增：多聊天对象管理
+  - 顶部栏右侧增加「聊天对象选择器」下拉菜单
+  - 支持创建多个聊天对象，每个独立维护对话历史
+  - 下拉菜单展示对象列表（头像 + 名字 + 简介 + 消息数）
+  - 点击「+ 新建聊天对象」弹出创建 Modal
+
+### 2. 新增：人设设置
+  - 左侧面板顶部新增「人设卡片」区域
+  - 显示当前聊天对象的名字 + 标签（性格、爱好、认识场景等）
+  - 点击「编辑人设」可打开 Modal 修改
+  - 创建新对象时通过 Modal 表单录入：
+    · 名字/称呼
+    · 认识场景
+    · 朋友圈人设
+    · 兴趣爱好
+    · 近期聊天内容（帮助 AI 推断性格和相处状态）
+  - 人设信息会作为上下文传给 Claude API，提升回复质量
+
+### 3. 变更：AI 辅助触发方式
+  - v1：发送她消息后自动触发 AI 分析
+  - v2：右侧 Header 新增「AI 辅助」按钮，用户手动触发
+  - 发送她消息后，显示蓝色提示条「已收到她的消息，点击右上角 AI 辅助获取回复建议」
+  - 点击「AI 辅助」后，左侧面板更新分析结果和回复选项
+  - 原因：用户可能想一次输入多条消息再分析
+
+### 4. 新增：自定义回复
+  - 回复选项区底部新增「自定义回复」输入区
+  - 虚线分隔 AI 建议和自定义输入
+  - 用户可跳过所有 AI 建议，直接输入自己的回复
+  - 自定义回复同样以绿色气泡上屏到右侧聊天区
+
+### 5. 新增：消息来源标记
+  - 每条消息气泡下方增加来源标记：
+    · 「手动输入」— 用户在右侧输入框手动输入的内容
+    · 「AI 建议 · 魔趣法则」— 选自 AI 建议的回复
+    · 「自定义回复」— 用户自己编写的回复
+  - 帮助用户回顾哪些是 AI 建议、哪些是自己的话
+
+### 6. 新增：存储模式
+  - 后端采用 SQLite 持久化存储
+  - 支持多个聊天对象的对话历史、人设信息持久化
+  - 页面刷新后数据不丢失
+
+### 7. 新增：AI 辅导窗口管理（防上下文爆炸）
+  - 左侧面板人设卡片下方新增「AI 辅导窗口管理条」
+  - 每个聊天对象可创建 N 个独立的 AI 辅导对话窗口
+  - 显示当前窗口编号（如 #3）和已用轮次
+  - 「窗口列表」按钮：下拉查看所有历史窗口，点击切换
+  - 「+ 新窗口」按钮：创建全新 AI 对话上下文
+  - 新建窗口时：
+    · 只携带人设信息 + 最近 N 条聊天记录（滑动窗口）
+    · 不携带之前 AI 窗口的对话历史
+    · 上下文完全重置，避免 token 爆炸
+  - 旧窗口保留，可回看历史分析和建议，但不可继续追加
+  - 右侧聊天记录始终是 1 条连续时间线（不随窗口切换变化）
+
+### 8. 架构变更：前后端分离
+  - 服务端独立为同级目录（chat-reply-server/）
+  - 前端目录：chat-reply-trainer/（React SPA）
+  - 后端目录：chat-reply-server/（Express + SQLite）
+  - 前后端通过 HTTP API 通信
+
+## 交互流程（v2）
+
+```
+用户打开应用
+    │
+    ▼
+┌───────────────────────────────┐
+│ 有聊天对象？                    │
+│   是 → 选择对象，进入聊天视图   │
+│   否 → 引导创建第一个聊天对象   │
+└───────────────┬───────────────┘
+                │
+                ▼
+┌───────────────────────────────────────────┐
+│ 左侧：AI辅导窗口 #3（自动新建或选已有）    │
+│ 右侧：该对象的聊天记录（连续时间线）       │
+└───────────────┬───────────────────────────┘
+                │
+                ▼
+┌───────────────────────────────┐
+│ 状态：等待她回复               │
+│ 操作：右侧输入框输入她的消息    │
+│       点击「发送」→ 上屏到右侧  │
+└───────────────┬───────────────┘
+                │
+                ▼
+┌───────────────────────────────┐
+│ 状态：已收到她的消息           │
+│ 显示：蓝色提示条               │
+│ 操作：点击「AI 辅助」          │
+└───────────────┬───────────────┘
+                │
+                ▼
+┌───────────────────────────────┐
+│ 状态：AI 分析中               │
+│ 发送：sessionId + 最近N条消息  │
+│       + 人设信息（非全量历史）  │
+│ 左侧：AI窗口轮次 +1            │
+└───────────────┬───────────────┘
+                │
+                ▼
+┌───────────────────────────────┐
+│ 状态：选择回复                 │
+│ 左侧：信号分析 + AI回复选项    │
+│        + 自定义回复输入        │
+└───────────────┬───────────────┘
+                │
+                ▼
+        回到「等待她回复」
+                │
+                │  上下文快爆了？
+                ▼
+┌───────────────────────────────┐
+│ 点击左侧「+ 新窗口」           │
+│ → 创建 AI辅导窗口 #4           │
+│ → 全新上下文，只带人设+最近消息 │
+│ → 旧窗口 #3 保留可回看         │
+└───────────────────────────────┘
+```
+
+## 数据模型变更（v2）
+
+### 核心关系：一对多防上下文爆炸
+
+```
+ChatTarget (聊天对象，如"小美")
+  │
+  ├── ChatMessage[] ──── 1条连续聊天记录（右侧微信聊天，持续增长）
+  │
+  └── AISession[] ────── N个AI辅导对话窗口（左侧AI分析，可新建重置）
+        │
+        ├── AISession #1 (已用12轮，上下文已满)
+        │     └── AIMessage[] ← 每次AI分析的请求+响应
+        │
+        ├── AISession #2 (已用15轮，上下文已满)
+        │     └── AIMessage[]
+        │
+        └── AISession #3 (当前，8轮)
+              └── AIMessage[] ← 当前活跃的AI对话上下文
+```
+
+关键设计：
+- 聊天记录（右侧）是1条连续时间线，跟随聊天对象，永不清空
+- AI辅导窗口（左侧）可以新建，每次新建 = 全新的AI上下文
+- 新窗口只携带：人设信息 + 最近N条聊天记录（滑动窗口）作为初始上下文
+- 不携带之前AI窗口的对话历史，防止上下文爆炸
+- 旧窗口保留，可回看历史分析，但不再追加
+
+```typescript
+// ===== 聊天对象 =====
+interface ChatTarget {
+  id: string;
+  name: string;
+  meetScene: string;         // 认识场景
+  persona: string;           // 朋友圈人设
+  hobbies: string;           // 兴趣爱好
+  recentChats: string;       // 近期聊天内容摘要
+  createdAt: number;
+}
+
+// ===== 聊天消息（右侧，1条连续记录） =====
+interface ChatMessage {
+  id: string;
+  targetId: string;          // 绑定聊天对象
+  role: 'her' | 'me';
+  text: string;
+  source: '手动输入' | 'AI建议' | '自定义回复';
+  strategy?: string;         // AI建议时标记策略名
+  sessionId?: string;        // 来自哪个AI辅导窗口
+  timestamp: number;
+}
+
+// ===== AI 辅导对话窗口（左侧，N个窗口） =====
+interface AISession {
+  id: string;
+  targetId: string;          // 绑定聊天对象
+  title: string;             // 如 "#3"
+  isActive: boolean;         // 是否为当前活跃窗口
+  roundCount: number;        // 已用轮次
+  createdAt: number;
+}
+
+// ===== AI 辅导对话消息（窗口内的请求+响应） =====
+interface AIMessage {
+  id: string;
+  sessionId: string;         // 绑定AI辅导窗口
+  type: 'request' | 'response';
+  // request: 发给AI的聊天记录片段
+  // response: AI返回的分析+回复建议
+  analysis?: AnalysisData;
+  replies?: ReplyOption[];
+  timestamp: number;
+}
+
+// ===== API 请求 =====
+interface GenerateRepliesRequest {
+  targetId: string;
+  sessionId: string;         // 当前AI辅导窗口ID
+  messages: ChatMessage[];   // 最近N条聊天记录（滑动窗口，非全量）
+  persona: {
+    name: string;
+    meetScene: string;
+    persona: string;
+    hobbies: string;
+    recentChats: string;
+  };
+}
+```
+
+## 项目目录结构（v2）
+
+```
+reply/
+├── chat-reply-trainer/        # 前端项目
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ChatBubble.tsx
+│   │   │   ├── ChatHistory.tsx
+│   │   │   ├── MessageInput.tsx
+│   │   │   ├── AnalysisBar.tsx
+│   │   │   ├── ReplyCard.tsx
+│   │   │   ├── ReplyOptions.tsx
+│   │   │   ├── CustomReply.tsx       # 新增：自定义回复组件
+│   │   │   ├── PersonCard.tsx        # 新增：人设卡片组件
+│   │   │   ├── TargetSelector.tsx    # 新增：聊天对象选择器
+│   │   │   └── TargetModal.tsx       # 新增：新建/编辑对象 Modal
+│   │   ├── hooks/
+│   │   │   └── useChat.ts
+│   │   ├── services/
+│   │   │   └── api.ts
+│   │   └── types.ts
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── chat-reply-server/          # 后端项目（独立目录）
+│   ├── index.ts                # Express 应用
+│   ├── prompt.ts               # 系统提示词
+│   ├── db.ts                   # SQLite 数据库
+│   ├── routes/
+│   │   ├── targets.ts          # 聊天对象 CRUD API
+│   │   └── chat.ts             # 对话消息 API + AI 生成
+│   ├── package.json
+│   └── .env                    # ANTHROPIC_API_KEY
+│
+└── docs/                       # 文档
+    ├── 需求整理.md
+    ├── ui-scheme.html
+    └── chat-trainer/
+```
+
+================================================================================
+-->
+
+</body>
+</html>
