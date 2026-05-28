@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Badge, Button, Space } from 'antd';
+import { Avatar, Badge, Button, Space, Popconfirm } from 'antd';
 import { RobotOutlined, ReloadOutlined } from '@ant-design/icons';
 
 interface ChatHeaderProps {
@@ -28,9 +28,18 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset
         >
           {isGenerating ? '分析中...' : 'AI 辅助'}
         </Button>
-        <Button size="small" icon={<ReloadOutlined />} onClick={onReset}>
-          重新开始
-        </Button>
+        <Popconfirm
+          title="确定清空所有聊天记录？"
+          description="此操作不可恢复"
+          onConfirm={onReset}
+          okText="确定"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <Button size="small" icon={<ReloadOutlined />}>
+            重新开始
+          </Button>
+        </Popconfirm>
       </Space>
     </div>
   );

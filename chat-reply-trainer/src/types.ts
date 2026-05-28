@@ -106,4 +106,6 @@ export type AppAction =
   | { type: 'OPEN_MODAL'; target?: ChatTarget | null }
   | { type: 'CLOSE_MODAL' }
   | { type: 'ADD_TARGET'; target: ChatTarget }
-  | { type: 'UPDATE_TARGET'; target: ChatTarget };
+  | { type: 'UPDATE_TARGET'; target: ChatTarget }
+  | { type: 'EDIT_MESSAGE'; id: string; text: string }
+  | { type: 'DELETE_MESSAGE'; id: string };

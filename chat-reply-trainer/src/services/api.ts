@@ -38,6 +38,12 @@ export const addMessage = (targetId: string, data: Partial<ChatMessage>) =>
 export const clearMessages = (targetId: string) =>
   request<{ success: boolean }>(`/targets/${targetId}/messages`, { method: 'DELETE' });
 
+export const updateMessage = (msgId: string, text: string) =>
+  request<ChatMessage>(`/messages/${msgId}`, { method: 'PUT', body: JSON.stringify({ text }) });
+
+export const deleteMessage = (msgId: string) =>
+  request<{ success: boolean }>(`/messages/${msgId}`, { method: 'DELETE' });
+
 // Sessions
 export const getSessions = (targetId: string) =>
   request<AISession[]>(`/targets/${targetId}/sessions`);

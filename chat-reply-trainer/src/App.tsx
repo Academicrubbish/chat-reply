@@ -104,6 +104,16 @@ function AppContent() {
     }
   };
 
+  const handleEditMessage = async (id: string, text: string) => {
+    await api.updateMessage(id, text);
+    dispatch({ type: 'EDIT_MESSAGE', id, text });
+  };
+
+  const handleDeleteMessage = async (id: string) => {
+    await api.deleteMessage(id);
+    dispatch({ type: 'DELETE_MESSAGE', id });
+  };
+
   // Empty state
   if (state.targets.length === 0 && !state.currentTargetId) {
     return (
@@ -187,6 +197,8 @@ function AppContent() {
           <ChatHistory
             messages={state.messages}
             targetName={currentTarget?.name || ''}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
           />
           {state.phase === 'her_sent' && (
             <div className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-primary bg-[#e8f0fe] border-t border-[#d0dff5]">

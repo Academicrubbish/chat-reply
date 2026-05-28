@@ -6,9 +6,11 @@ import ChatBubble from './ChatBubble';
 interface ChatHistoryProps {
   messages: ChatMessage[];
   targetName: string;
+  onEditMessage?: (id: string, text: string) => void;
+  onDeleteMessage?: (id: string) => void;
 }
 
-const ChatHistory: React.FC<ChatHistoryProps> = ({ messages, targetName }) => {
+const ChatHistory: React.FC<ChatHistoryProps> = ({ messages, targetName, onEditMessage, onDeleteMessage }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -21,7 +23,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({ messages, targetName }) => {
         <Empty description="开始新对话" style={{ marginTop: 40 }} />
       )}
       {messages.map((msg) => (
-        <ChatBubble key={msg.id} message={msg} targetName={targetName} />
+        <ChatBubble
+          key={msg.id}
+          message={msg}
+          targetName={targetName}
+          onEdit={onEditMessage}
+          onDelete={onDeleteMessage}
+        />
       ))}
       <div ref={bottomRef} />
     </div>

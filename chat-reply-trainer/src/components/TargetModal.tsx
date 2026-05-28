@@ -139,7 +139,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
             </Form.Item>
 
             <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: -8, marginBottom: 12 }}>
-              支持格式：她：xxx / 【她】xxx / 她 &gt; xxx / 微信导出格式（混合使用也可）
+              支持格式：她：xxx / 我：xxx / 【她】xxx / 【我】xxx / 她 &gt; xxx / 我 &gt; xxx / 他：xxx / 【他】xxx / 他 &gt; xxx（混合使用也可）
             </Typography.Text>
 
             {parsedResult && msgCount > 0 && (

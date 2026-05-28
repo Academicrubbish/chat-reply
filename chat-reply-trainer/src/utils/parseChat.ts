@@ -8,12 +8,12 @@ export interface ParseResult {
   warnings: string[];
 }
 
-// Format 1: 她：xxx / 我：xxx (fullwidth or halfwidth colon)
-const FORMAT1 = /^(她|我)[：:]\s*(.*)$/;
-// Format 2: 【她】xxx / 【我】xxx
-const FORMAT2 = /^【(她|我)】\s*(.*)$/;
-// Format 3: 她 > xxx / 我 > xxx
-const FORMAT3 = /^(她|我)\s*>\s*(.*)$/;
+// Format 1: 她/他：xxx / 我：xxx (fullwidth or halfwidth colon)
+const FORMAT1 = /^(她|他|我)[：:]\s*(.*)$/;
+// Format 2: 【她/他】xxx / 【我】xxx
+const FORMAT2 = /^【(她|他|我)】\s*(.*)$/;
+// Format 3: 她/他 > xxx / 我 > xxx
+const FORMAT3 = /^(她|他|我)\s*>\s*(.*)$/;
 // WeChat export header: 昵称 HH:MM or HH:MM:SS
 const WECHAT_HEADER = /^(.+?)\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$/;
 
@@ -24,7 +24,7 @@ function tryParseLine(line: string): { role: 'her' | 'me'; text: string } | null
     const match = line.match(regex);
     if (match) {
       return {
-        role: match[1] === '她' ? 'her' : 'me',
+        role: match[1] === '我' ? 'me' : 'her',
         text: match[2],
       };
     }

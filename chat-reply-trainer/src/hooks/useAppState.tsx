@@ -88,6 +88,16 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         targets: state.targets.map(t => t.id === action.target.id ? action.target : t),
       };
+    case 'EDIT_MESSAGE':
+      return {
+        ...state,
+        messages: state.messages.map(m => m.id === action.id ? { ...m, text: action.text } : m),
+      };
+    case 'DELETE_MESSAGE':
+      return {
+        ...state,
+        messages: state.messages.filter(m => m.id !== action.id),
+      };
     default:
       return state;
   }

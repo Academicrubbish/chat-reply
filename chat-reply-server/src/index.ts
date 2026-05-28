@@ -99,6 +99,22 @@ app.delete('/api/targets/:id/messages', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+app.put('/api/messages/:id', (req: Request, res: Response) => {
+  const { text } = req.body;
+  if (!text?.trim()) { res.status(400).json({ error: 'text 必填' }); return; }
+  const existing = db.prepare('SELECT id FROM chat_messages WHERE id = ?').get(req.params.id);
+  if (!existing) { res.status(404).json({ error: '消息不存在' }); return; }
+  db.prepare('UPDATE chat_messages SET text = ? WHERE id = ?').run(text.trim(), req.params.id);
+  res.json(db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(req.params.id));
+});
+
+app.delete('/api/messages/:id', (req: Request, res: Response) => {
+  const existing = db.prepare('SELECT id FROM chat_messages WHERE id = ?').get(req.params.id);
+  if (!existing) { res.status(404).json({ error: '消息不存在' }); return; }
+  db.prepare('DELETE FROM chat_messages WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
 // ===== Sessions =====
 app.get('/api/targets/:id/sessions', (req: Request, res: Response) => {
   res.json(db.prepare('SELECT * FROM ai_sessions WHERE target_id = ? ORDER BY created_at DESC').all(req.params.id));
