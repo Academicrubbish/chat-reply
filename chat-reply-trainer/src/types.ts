@@ -84,6 +84,12 @@ export interface GenerateResponse {
 
 export type AppPhase = 'idle' | 'her_sent' | 'generating' | 'waiting_select';
 
+export interface ModelOption {
+  provider: string;
+  label: string;
+  model: string;
+}
+
 export interface AppState {
   phase: AppPhase;
   generationStep: GenerationStep;

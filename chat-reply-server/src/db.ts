@@ -2,6 +2,7 @@ import initSqlJs from 'sql.js';
 import type { Database as SqlJsDatabase, SqlValue } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 
 const dataDir = path.join(process.cwd(), 'data');
 if (!fs.existsSync(dataDir)) {
@@ -214,9 +215,24 @@ export async function initDb(): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_ai_messages_session ON ai_messages(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   dbReady = true;
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
 }
 
 export default dbWrapper;

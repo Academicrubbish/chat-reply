@@ -1,4 +1,4 @@
-import { Dropdown, Avatar } from 'antd';
+import { Dropdown, Avatar, Modal } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ChatTarget } from '../types';
@@ -14,6 +14,17 @@ interface TargetSelectorProps {
 export default function TargetSelector({ targets, currentId, onSelect, onCreateNew, onDelete }: TargetSelectorProps) {
   const current = targets.find(t => t.id === currentId);
 
+  const confirmDelete = (id: string, name: string) => {
+    Modal.confirm({
+      title: '删除聊天对象',
+      content: `删除「${name}」后所有聊天记录和 AI 窗口将清除，不可恢复`,
+      okText: '删除',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk: () => onDelete(id),
+    });
+  };
+
   const menuItems: MenuProps['items'] = [
     ...targets.map(t => ({
       key: t.id,
@@ -22,7 +33,7 @@ export default function TargetSelector({ targets, currentId, onSelect, onCreateN
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
           <DeleteOutlined
             style={{ color: '#ccc', fontSize: 12 }}
-            onClick={e => { e.stopPropagation(); onDelete(t.id); }}
+            onClick={e => { e.stopPropagation(); confirmDelete(t.id, t.name); }}
           />
         </div>
       ),

@@ -1,5 +1,5 @@
-import { createContext, useContext, useReducer, useRef, useEffect, type Dispatch, type ReactNode } from 'react';
-import type { AppState, AppAction, ChatMessage } from '../types';
+import { createContext, useContext, useReducer, useRef, useEffect, useState, type Dispatch, type ReactNode } from 'react';
+import type { AppState, AppAction, ChatMessage, ModelOption } from '../types';
 import * as api from '../services/api';
 
 const STEP_ORDER: Record<string, number> = { idle: 0, analyze: 1, generating: 2, parsing: 3, done: 4 };
@@ -171,6 +171,9 @@ interface AppContextValue {
   createNewSession: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  models: ModelOption[];
+  selectedProvider: string;
+  setSelectedProvider: (provider: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -178,6 +181,12 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const activeAbortRef = useRef<AbortController | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState('zhipu');
+  const [models, setModels] = useState<ModelOption[]>([]);
+
+  useEffect(() => {
+    api.getModels().then(({ models }) => setModels(models)).catch(() => {});
+  }, []);
 
   // Cleanup: abort any in-flight SSE on unmount
   useEffect(() => () => { activeAbortRef.current?.abort(); }, []);
@@ -246,6 +255,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const ctrl = api.generateReplyStream(
       sessionId,
       lastHerMsg?.text || '',
+      selectedProvider,
       (evt) => {
         resetHeartbeat();
         if (evt.event !== 'heartbeat' && evt.event !== 'delta') {
@@ -362,6 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       state, dispatch, selectTarget, sendHerMessage, triggerAI,
       selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
+      models, selectedProvider, setSelectedProvider,
     }}>
       {children}
     </AppContext.Provider>

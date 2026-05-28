@@ -1,18 +1,38 @@
-import type { ChatTarget, ChatMessage, AISession, GenerateResponse } from '../types';
+import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption } from '../types';
 
 const BASE = '/api';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}${url}`, { headers, ...options });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.reload();
+    throw new Error('认证失败，请重新登录');
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     throw new Error(body.error || `请求失败 (${res.status})`);
   }
   return res.json();
 }
+
+// Auth
+export const getAuthStatus = () => request<{ initialized: boolean }>('/auth/status');
+
+export const setupAccount = (username: string, password: string) =>
+  request<{ token: string }>('/auth/setup', { method: 'POST', body: JSON.stringify({ username, password }) });
+
+export const login = (username: string, password: string) =>
+  request<{ token: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+
+export const register = (username: string, password: string) =>
+  request<{ token: string }>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password }) });
+
+export const getModels = () => request<{ models: ModelOption[] }>('/models');
 
 // Targets
 export const getTargets = () => request<ChatTarget[]>('/targets');
@@ -72,6 +92,7 @@ export type SSEEvent = {
 export function generateReplyStream(
   sessionId: string,
   herMessage: string,
+  provider: string = 'zhipu',
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
@@ -79,7 +100,7 @@ export function generateReplyStream(
   fetch(`${BASE}/sessions/${sessionId}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ herMessage }),
+    body: JSON.stringify({ herMessage, provider }),
     signal: ctrl.signal,
   }).then(async (res) => {
     if (!res.ok) {

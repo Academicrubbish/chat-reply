@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button, Progress, Select, Space, Popconfirm } from 'antd';
 import { PlusOutlined, UnorderedListOutlined, DeleteOutlined } from '@ant-design/icons';
-import type { AISession } from '../types';
+import type { AISession, ModelOption } from '../types';
 
 interface SessionBarProps {
   session: AISession | null;
@@ -9,6 +9,9 @@ interface SessionBarProps {
   onSelectSession: (id: string) => void;
   onCreateSession: () => void;
   onDeleteSession: (id: string) => void;
+  models?: ModelOption[];
+  selectedProvider?: string;
+  onSelectProvider?: (provider: string) => void;
 }
 
 const SessionBar: React.FC<SessionBarProps> = ({
@@ -17,6 +20,9 @@ const SessionBar: React.FC<SessionBarProps> = ({
   onSelectSession,
   onCreateSession,
   onDeleteSession,
+  models = [],
+  selectedProvider = 'zhipu',
+  onSelectProvider,
 }) => {
   const currentIndex = session
     ? sessions.findIndex((s) => s.id === session.id)
@@ -51,6 +57,15 @@ const SessionBar: React.FC<SessionBarProps> = ({
       </div>
 
       <Space>
+        {models.length > 1 && onSelectProvider && (
+          <Select
+            size="small"
+            value={selectedProvider}
+            style={{ width: 120 }}
+            onChange={onSelectProvider}
+            options={models.map(m => ({ value: m.provider, label: m.label }))}
+          />
+        )}
         <Select
           size="small"
           value={session?.id}

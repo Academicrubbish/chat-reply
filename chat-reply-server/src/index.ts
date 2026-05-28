@@ -3,21 +3,110 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
 import { buildSystemPrompt } from './prompt';
-import { chatCompletion, chatCompletionStream } from './llm';
+import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'chat-reply-dev-secret-change-in-prod';
+
+function signToken(payload: { userId: string; username: string }): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
+}
+
+function authMiddleware(req: any, res: Response, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ error: '认证失败，请重新登录' });
+    return;
+  }
+  try {
+    req.user = jwt.verify(authHeader.slice(7), JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: '认证失败，请重新登录' });
+  }
+}
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'http://127.0.0.1:5173'],
+  credentials: true,
+}));
+app.use(express.json({ limit: '100kb' }));
+app.use(rateLimit({ windowMs: 60_000, max: 100 }));
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ ok: true });
+});
+
+// ===== Auth Routes (no JWT required) =====
+app.get('/api/auth/status', (_req: Request, res: Response) => {
+  const users = db.prepare('SELECT COUNT(*) as count FROM users').get() as any;
+  res.json({ initialized: users.count > 0 });
+});
+
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+  if (!username?.trim() || !password) { res.status(400).json({ error: '用户名和密码不能为空' }); return; }
+  if (password.length < 6) { res.status(400).json({ error: '密码至少6位' }); return; }
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim());
+  if (existing) { res.status(409).json({ error: '用户名已存在' }); return; }
+  const id = uuid();
+  const passwordHash = await bcrypt.hash(password, 10);
+  const now = Date.now();
+  db.prepare('INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)').run(id, username.trim(), passwordHash, now);
+  const token = signToken({ userId: id, username: username.trim() });
+  res.status(201).json({ token });
+});
+
+app.post('/api/auth/setup', async (req: Request, res: Response) => {
+  const users = db.prepare('SELECT COUNT(*) as count FROM users').get() as any;
+  if (users.count > 0) { res.status(403).json({ error: '系统已初始化' }); return; }
+  const { username, password } = req.body;
+  if (!username?.trim() || !password) { res.status(400).json({ error: '用户名和密码不能为空' }); return; }
+  if (password.length < 6) { res.status(400).json({ error: '密码至少6位' }); return; }
+  const id = uuid();
+  const passwordHash = await bcrypt.hash(password, 10);
+  const now = Date.now();
+  db.prepare('INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)').run(id, username.trim(), passwordHash, now);
+  const token = signToken({ userId: id, username: username.trim() });
+  res.status(201).json({ token });
+});
+
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+  if (!username || !password) { res.status(400).json({ error: '用户名和密码不能为空' }); return; }
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any;
+  if (!user) { res.status(401).json({ error: '用户名或密码错误' }); return; }
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) { res.status(401).json({ error: '用户名或密码错误' }); return; }
+  const token = signToken({ userId: user.id, username: user.username });
+  res.json({ token });
+});
+
+app.post('/api/auth/logout', (_req: Request, res: Response) => {
+  res.json({ success: true });
+});
+
+// JWT middleware for all /api/* routes except /api/auth/*
+app.use('/api', (req: Request, res: Response, next) => {
+  if (req.path.startsWith('/auth')) return next();
+  if (req.path === '/health') return next();
+  if (req.path === '/models') return next();
+  authMiddleware(req, res, next);
+});
+
+// Models
+app.get('/api/models', (_req: Request, res: Response) => {
+  res.json({ models: getAvailableModels() });
 });
 
 // ===== Targets CRUD =====
@@ -160,7 +249,7 @@ app.delete('/api/sessions/:sessionId', (req: Request, res: Response) => {
 // ===== AI Generate Core =====
 app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response) => {
   try {
-    const { herMessage } = req.body;
+    const { herMessage, provider } = req.body;
     if (!herMessage?.trim()) { res.status(400).json({ error: '消息不能为空' }); return; }
 
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
@@ -231,7 +320,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
     }, 2000);
 
     try {
-      for await (const delta of chatCompletionStream(conversationMessages)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu')) {
         raw += delta;
         send('delta', { text: delta });
       }
@@ -239,57 +328,70 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
       clearInterval(heartbeatTimer);
     }
 
-    // Step 3: Parse response
+    // Step 3: Parse response with multi-round fallback
     send('step', { step: 'parsing' });
 
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
 
-    let parsed: any;
-    try {
-      // Strip markdown code fences
-      let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+    const SAFE_FALLBACK = {
+      analysis: {
+        stage: '分析中', signal: '模糊', strategy: '安全回复',
+        signalText: 'AI 返回格式异常，已降级处理', emotions: [],
+        tip: '建议重新生成', favorability: 50, favorabilityReason: '',
+      },
+      plan: { goal: '维持当前关系', nextStep: '继续对话' },
+      replies: [{ id: 1, strategy: '安全回复', text: '嗯嗯，确实', reason: '降级兜底回复' }],
+    };
 
-      // Remove Chinese quotes (U+201C/U+201D) — they break JSON parsing when unescaped inside string values
-      cleaned = cleaned.replace(/[“”]/g, '');
+    function parseJsonSafely(text: string): any | null {
+      // Attempt 1: Direct parse
+      try { return JSON.parse(text); } catch {}
 
-      // Strategy 1: regex — first { to last } (handles trailing garbage)
-      let jsonStr = '';
-      const firstBrace = cleaned.indexOf('{');
-      const lastBrace = cleaned.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace > firstBrace) {
-        jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
-      } else if (firstBrace !== -1) {
-        // Truncated: no closing brace
-        jsonStr = cleaned.slice(firstBrace);
-      } else {
-        throw new Error('AI 未返回有效 JSON\n原始响应: ' + raw.slice(0, 200));
-      }
+      // Attempt 2: Strip markdown code fences
+      const stripped = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+      try { return JSON.parse(stripped); } catch {}
+
+      // Attempt 3: Replace Chinese quotes
+      const noChineseQuotes = stripped.replace(/[“”]/g, '”');
+      try { return JSON.parse(noChineseQuotes); } catch {}
+
+      // Attempt 4: Extract JSON block and try to salvage
+      const firstBrace = noChineseQuotes.indexOf('{');
+      const lastBrace = noChineseQuotes.lastIndexOf('}');
+      if (firstBrace === -1) return null;
+
+      let jsonStr = lastBrace > firstBrace
+        ? noChineseQuotes.slice(firstBrace, lastBrace + 1)
+        : noChineseQuotes.slice(firstBrace);
 
       // Clean control chars and trailing commas
-      jsonStr = jsonStr
-        .replace(/[\x00-\x1f]/g, '')
-        .replace(/,\s*([}\]])/g, '$1');
+      jsonStr = jsonStr.replace(/[\x00-\x1f]/g, '').replace(/,\s*([}\]])/g, '$1');
 
+      try { return JSON.parse(jsonStr); } catch {}
+
+      // Attempt 5: Salvage truncated JSON — balance brackets and quotes
+      let salvage = jsonStr;
+      const quoteCount = (salvage.match(/”/g) || []).length;
+      if (quoteCount % 2 !== 0) salvage += '”';
+      const openBrackets = (salvage.match(/\[/g) || []).length - (salvage.match(/\]/g) || []).length;
+      const openBraces = (salvage.match(/\{/g) || []).length - (salvage.match(/\}/g) || []).length;
+      for (let i = 0; i < openBrackets; i++) salvage += ']';
+      for (let i = 0; i < openBraces; i++) salvage += '}';
+      salvage = salvage.replace(/,\s*([}\]])/g, '$1');
       try {
-        parsed = JSON.parse(jsonStr);
-      } catch {
-        // Try to salvage truncated JSON
-        let salvage = jsonStr;
-        const quoteCount = (salvage.match(/"/g) || []).length;
-        if (quoteCount % 2 !== 0) salvage += '"';
-        const openBrackets = (salvage.match(/\[/g) || []).length - (salvage.match(/\]/g) || []).length;
-        const openBraces = (salvage.match(/\{/g) || []).length - (salvage.match(/\}/g) || []).length;
-        for (let i = 0; i < openBrackets; i++) salvage += ']';
-        for (let i = 0; i < openBraces; i++) salvage += '}';
-        salvage = salvage.replace(/,\s*([}\]])/g, '$1');
-        parsed = JSON.parse(salvage);
+        const result = JSON.parse(salvage);
         console.log('[LLM] Salvaged truncated JSON successfully');
-      }
-    } catch (parseErr: any) {
-      console.error('[LLM Parse Error]', parseErr.message, '\nRaw:', raw.slice(0, 500));
-      send('error', { message: `AI 响应解析失败: ${parseErr.message}` });
-      res.end();
-      return;
+        return result;
+      } catch {}
+
+      return null;
+    }
+
+    let parsed = parseJsonSafely(raw);
+    if (!parsed) {
+      console.error('[LLM Parse Error] All fallback attempts failed. Raw:', raw.slice(0, 500));
+      parsed = SAFE_FALLBACK;
+      console.log('[LLM] Using safe fallback response');
     }
 
     console.log('[LLM Parsed] keys:', Object.keys(parsed), 'replies count:', parsed.replies?.length ?? 0);
@@ -368,7 +470,7 @@ app.post('/api/sessions/:sessionId/custom-reply', (req: Request, res: Response) 
 
 app.post('/api/sessions/:sessionId/regenerate', async (req: Request, res: Response) => {
   try {
-    const { preferredStrategy } = req.body;
+    const { preferredStrategy, provider } = req.body;
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
@@ -393,7 +495,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: Request, res: Respon
     const conversationMessages: Array<{ role: string; content: string }> = [{ role: 'system', content: systemPrompt }];
     for (const aiMsg of aiMessages) { conversationMessages.push({ role: aiMsg.role, content: aiMsg.content }); }
 
-    const raw = await chatCompletion(conversationMessages);
+    const raw = await chatCompletion(conversationMessages, provider || 'zhipu');
     let parsed: any;
     try { const m = raw.match(/\{[\s\S]*\}/); if (!m) throw new Error('no json'); parsed = JSON.parse(m[0]); }
     catch (parseErr: any) { res.status(500).json({ error: `AI 响应解析失败` }); return; }

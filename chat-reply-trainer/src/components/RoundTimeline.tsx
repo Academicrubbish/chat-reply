@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Collapse, Tag, Card, Button, Space, Input, Spin, Tooltip } from 'antd';
 import {
   LikeOutlined, DislikeOutlined,
@@ -290,7 +290,7 @@ function CurrentRoundCard({
   );
 }
 
-export default function RoundTimeline({
+const RoundTimeline = React.memo(function RoundTimeline({
   aiMessages,
   phase,
   currentAnalysis,
@@ -304,7 +304,7 @@ export default function RoundTimeline({
   onRegenerate,
   onFeedback,
 }: RoundTimelineProps) {
-  const historicalRounds = parseAiMessages(aiMessages);
+  const historicalRounds = useMemo(() => parseAiMessages(aiMessages), [aiMessages]);
   const displayRounds = phase === 'waiting_select' && currentAnalysis && currentReplies
     ? historicalRounds.slice(0, -1)
     : historicalRounds;
@@ -395,4 +395,6 @@ export default function RoundTimeline({
       />
     </div>
   );
-}
+});
+
+export default RoundTimeline;

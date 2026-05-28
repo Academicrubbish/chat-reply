@@ -1,10 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Empty, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import * as api from './services/api';
 import { parseChatWithMeta } from './utils/parseChat';
 import type { ParsedMessage } from './utils/parseChat';
+import ErrorBoundary from './components/ErrorBoundary';
+import SetupPage from './components/SetupPage';
+import LoginPage from './components/LoginPage';
+import SignUpPage from './components/SignUpPage';
+import OnboardingPage from './components/OnboardingPage';
 import TargetSelector from './components/TargetSelector';
 import TargetModal from './components/TargetModal';
 import PersonCard from './components/PersonCard';
@@ -16,8 +21,16 @@ import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
+  const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Load targets on mount
   useEffect(() => {
@@ -132,7 +145,7 @@ function AppContent() {
     selectTarget(state.currentTargetId);
   };
 
-  // Empty state
+  // Empty state — onboarding page
   if (state.targets.length === 0 && !state.currentTargetId) {
     return (
       <>
@@ -143,13 +156,7 @@ function AppContent() {
             <div className="text-xs text-[#888]">Chat Reply Trainer · AI Agent 辅助沟通</div>
           </div>
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <Empty description="创建第一个聊天对象，AI 将帮你分析消息并生成回复建议">
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => dispatch({ type: 'OPEN_MODAL' })}>
-              新建聊天对象
-            </Button>
-          </Empty>
-        </div>
+        <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} />
         <TargetModal
           open={state.modalOpen}
           target={state.editingTarget}
@@ -181,10 +188,29 @@ function AppContent() {
         />
       </div>
 
+      {/* Mobile Tab Bar */}
+      {isMobile && (
+        <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
+          <button onClick={() => setMobileTab('chat')} style={{
+            flex: 1, padding: '8px 0', border: 'none', background: mobileTab === 'chat' ? '#e8f0fe' : '#fff',
+            color: mobileTab === 'chat' ? '#3b5998' : '#666', fontWeight: mobileTab === 'chat' ? 600 : 400,
+            fontSize: 13, cursor: 'pointer', borderBottom: mobileTab === 'chat' ? '2px solid #3b5998' : '2px solid transparent',
+          }}>聊天</button>
+          <button onClick={() => setMobileTab('ai')} style={{
+            flex: 1, padding: '8px 0', border: 'none', background: mobileTab === 'ai' ? '#e8f0fe' : '#fff',
+            color: mobileTab === 'ai' ? '#3b5998' : '#666', fontWeight: mobileTab === 'ai' ? 600 : 400,
+            fontSize: 13, cursor: 'pointer', borderBottom: mobileTab === 'ai' ? '2px solid #3b5998' : '2px solid transparent',
+          }}>AI 辅助</button>
+        </div>
+      )}
+
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel - AI Console */}
-        <div className="flex-1 min-w-0 bg-white border-r border-border flex flex-col overflow-hidden">
+        <div
+          className="flex-1 min-w-0 bg-white border-r border-border flex flex-col overflow-hidden"
+          style={isMobile ? { display: mobileTab === 'ai' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', borderRight: 'none' } : undefined}
+        >
           <PersonCard
             target={currentTarget}
             onEdit={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
@@ -195,10 +221,19 @@ function AppContent() {
             onSelectSession={switchSession}
             onCreateSession={createNewSession}
             onDeleteSession={deleteSession}
+            models={models}
+            selectedProvider={selectedProvider}
+            onSelectProvider={setSelectedProvider}
           />
           <ContextBar analysis={state.currentAnalysis} />
 
           {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
+          <ErrorBoundary boundaryName="AI分析" fallback={(err, retry) => (
+            <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+              <div style={{ fontSize: 14, marginBottom: 8 }}>AI 分析区域加载失败</div>
+              <button onClick={retry} style={{ padding: '4px 16px', border: '1px solid #3b5998', borderRadius: 6, background: '#3b5998', color: '#fff', cursor: 'pointer', fontSize: 12 }}>重试</button>
+            </div>
+          )}>
           <RoundTimeline
             aiMessages={state.aiMessages}
             phase={state.phase}
@@ -213,16 +248,26 @@ function AppContent() {
             onRegenerate={handleRegenerate}
             onFeedback={handleFeedback}
           />
+          </ErrorBoundary>
         </div>
 
         {/* Right Panel - Chat Simulator */}
-        <div className="w-[30%] max-w-105 flex flex-col bg-chat-bg">
+        <div
+          className="w-[30%] max-w-105 flex flex-col bg-chat-bg"
+          style={isMobile ? { display: mobileTab === 'chat' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', width: '100%' } : undefined}
+        >
           <ChatHeader
             targetName={currentTarget?.name || ''}
             onAIAssist={triggerAI}
             onReset={handleReset}
             isGenerating={state.phase === 'generating'}
           />
+          <ErrorBoundary boundaryName="聊天记录" fallback={(err, retry) => (
+            <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+              <div style={{ fontSize: 14, marginBottom: 8 }}>聊天记录加载失败</div>
+              <button onClick={retry} style={{ padding: '4px 16px', border: '1px solid #3b5998', borderRadius: 6, background: '#3b5998', color: '#fff', cursor: 'pointer', fontSize: 12 }}>重试</button>
+            </div>
+          )}>
           <ChatHistory
             messages={state.messages}
             targetName={currentTarget?.name || ''}
@@ -231,6 +276,7 @@ function AppContent() {
             onAddScene={handleAddScene}
             onImportMessages={handleImportMessages}
           />
+          </ErrorBoundary>
           {state.phase === 'her_sent' && (
             <div className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-primary bg-[#e8f0fe] border-t border-[#d0dff5]">
               <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
@@ -256,10 +302,49 @@ function AppContent() {
 }
 
 function App() {
+  const [authState, setAuthState] = useState<'loading' | 'setup' | 'login' | 'signup' | 'authenticated'>('loading');
+
+  useEffect(() => {
+    api.getAuthStatus().then(({ initialized }) => {
+      if (!initialized) {
+        setAuthState('setup');
+        return;
+      }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setAuthState('login');
+        return;
+      }
+      // Verify token by making an authenticated request
+      api.getTargets().then(() => setAuthState('authenticated')).catch(() => {
+        localStorage.removeItem('token');
+        setAuthState('login');
+      });
+    }).catch(() => setAuthState('login'));
+  }, []);
+
+  if (authState === 'loading') {
+    return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>加载中...</div>;
+  }
+
+  if (authState === 'setup') {
+    return <SetupPage onSuccess={() => setAuthState('authenticated')} />;
+  }
+
+  if (authState === 'login') {
+    return <LoginPage onSuccess={() => setAuthState('authenticated')} onSwitchToSignUp={() => setAuthState('signup')} />;
+  }
+
+  if (authState === 'signup') {
+    return <SignUpPage onSuccess={() => setAuthState('authenticated')} onSwitchToLogin={() => setAuthState('login')} />;
+  }
+
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <ErrorBoundary boundaryName="全局">
+      <AppProvider>
+        <AppContent />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 
