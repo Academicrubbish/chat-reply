@@ -21,9 +21,23 @@ function getClient(): OpenAI {
 export async function chatCompletion(messages: Array<{ role: string; content: string }>): Promise<string> {
   const response = await getClient().chat.completions.create({
     model: MODEL,
-    messages,
+    messages: messages as any,
     temperature: 0.8,
     max_tokens: 2048,
   });
   return response.choices[0].message.content || '';
+}
+
+export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>): AsyncGenerator<string> {
+  const stream = await getClient().chat.completions.create({
+    model: MODEL,
+    messages: messages as any,
+    temperature: 0.8,
+    max_tokens: 2048,
+    stream: true,
+  });
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
+  }
 }

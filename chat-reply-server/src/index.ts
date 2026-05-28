@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from './db';
 import { buildSystemPrompt } from './prompt';
-import { chatCompletion } from './llm';
+import { chatCompletion, chatCompletionStream } from './llm';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -84,7 +84,7 @@ app.get('/api/targets/:id/messages', (req: Request, res: Response) => {
 app.post('/api/targets/:id/messages', (req: Request, res: Response) => {
   const { role, text, source, strategy, session_id } = req.body;
   if (!role || !text?.trim()) { res.status(400).json({ error: 'role 和 text 必填' }); return; }
-  if (!['her', 'me'].includes(role)) { res.status(400).json({ error: 'role 必须为 her 或 me' }); return; }
+  if (!['her', 'me', 'scene'].includes(role)) { res.status(400).json({ error: 'role 必须为 her、me 或 scene' }); return; }
   const target = db.prepare('SELECT id FROM chat_targets WHERE id = ?').get(req.params.id);
   if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   const id = uuid();
@@ -190,30 +190,68 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${herMessage}` });
 
-    // Estimate tokens (rough: Chinese 1 char ≈ 2 tokens)
+    // Estimate tokens
     const totalText = conversationMessages.map(m => m.content).join('');
     const estimatedTokens = Math.ceil(totalText.length * 2);
 
-    // Call GLM-5.1
-    const raw = await chatCompletion(conversationMessages);
+    // SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
 
-    // Parse JSON response
+    const send = (event: string, data: any) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Step 1: Analyze
+    send('step', { step: 'analyze' });
+
+    // Step 2: Call LLM with streaming
+    let raw = '';
+    send('step', { step: 'generating' });
+
+    for await (const delta of chatCompletionStream(conversationMessages)) {
+      raw += delta;
+      send('delta', { text: delta });
+    }
+
+    // Step 3: Parse response
+    send('step', { step: 'parsing' });
+
+    console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
+
     let parsed: any;
     try {
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('AI 未返回有效 JSON');
+      // Strip markdown code fences
+      let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+      // Extract JSON object
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('AI 未返回有效 JSON\n原始响应: ' + raw.slice(0, 200));
       let jsonStr = jsonMatch[0]
-        .replace(/,\s*([}\]])/g, '$1')           // remove trailing commas
-        .replace(/\/\/.*$/gm, '')                 // remove single-line comments
-        .replace(/[\x00-\x1f]/g, '')             // remove control chars
-        .replace(/'/g, '"');                       // try single→double quotes
+        .replace(/,\s*([}\]])/g, '$1')
+        .replace(/\/\/.*$/gm, '')
+        .replace(/[\x00-\x1f]/g, '')
+        .replace(/'/g, '"');
       parsed = JSON.parse(jsonStr);
     } catch (parseErr: any) {
-      res.status(500).json({ error: `AI 响应解析失败: ${parseErr.message}` });
+      console.error('[LLM Parse Error]', parseErr.message, '\nRaw:', raw.slice(0, 500));
+      send('error', { message: `AI 响应解析失败: ${parseErr.message}` });
+      res.end();
       return;
     }
 
-    // Save AI messages
+    // Send structured events
+    if (parsed.analysis) send('analysis', parsed.analysis);
+    if (parsed.plan) send('plan', parsed.plan);
+
+    const maxTokens = 8000;
+    const contextUsage = { estimatedTokens, maxTokens, percentage: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100) };
+
+    if (parsed.replies) send('replies', parsed.replies);
+
+    // Save to DB
     const userAiMsgId = uuid();
     const assistantAiMsgId = uuid();
     db.transaction(() => {
@@ -221,8 +259,6 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
         .run(userAiMsgId, session.id, 'user', JSON.stringify({ herMessage }), now);
       db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(assistantAiMsgId, session.id, 'assistant', JSON.stringify(parsed), now + 1);
-
-      // Update session
       const newRoundCount = session.round_count + 1;
       const newPlanGoal = parsed.plan?.goal || session.plan_goal;
       const newPlanNextStep = parsed.plan?.nextStep || session.plan_next_step;
@@ -230,16 +266,16 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
         .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, session.id);
     })();
 
-    const maxTokens = 8000;
-    res.json({
-      analysis: parsed.analysis,
-      plan: parsed.plan || { goal: session.plan_goal, nextStep: session.plan_next_step },
-      contextUsage: { estimatedTokens, maxTokens, percentage: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100) },
-      replies: parsed.replies || [],
-    });
+    send('done', { contextUsage });
+    res.end();
   } catch (err: any) {
     console.error('Generate error:', err);
-    res.status(500).json({ error: err.message || 'AI 服务异常' });
+    try {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
+      res.end();
+    } catch {
+      // connection already closed
+    }
   }
 });
 

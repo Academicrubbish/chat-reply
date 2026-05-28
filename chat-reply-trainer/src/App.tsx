@@ -4,18 +4,16 @@ import { PlusOutlined } from '@ant-design/icons';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import * as api from './services/api';
 import { parseChatWithMeta } from './utils/parseChat';
+import type { ParsedMessage } from './utils/parseChat';
 import TargetSelector from './components/TargetSelector';
 import TargetModal from './components/TargetModal';
 import PersonCard from './components/PersonCard';
 import SessionBar from './components/SessionBar';
 import ContextBar from './components/ContextBar';
-import PlanCard from './components/PlanCard';
-import AnalysisTabs from './components/AnalysisTabs';
-import AgentSteps from './components/AgentSteps';
+import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
-import ReplyPopup from './components/ReplyPopup';
 
 function AppContent() {
   const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession } = useAppState();
@@ -114,6 +112,26 @@ function AppContent() {
     dispatch({ type: 'DELETE_MESSAGE', id });
   };
 
+  const handleAddScene = async (text: string) => {
+    if (!state.currentTargetId) return;
+    const msg = await api.addMessage(state.currentTargetId, {
+      role: 'scene', text, source: '场景补充',
+    });
+    dispatch({ type: 'SEND_HER_MESSAGE', message: msg });
+  };
+
+  const handleImportMessages = async (parsed: ParsedMessage[]) => {
+    if (!state.currentTargetId) return;
+    for (const msg of parsed) {
+      await api.addMessage(state.currentTargetId, {
+        role: msg.role,
+        text: msg.text,
+        source: msg.role === 'scene' ? '场景补充' : '历史记录',
+      });
+    }
+    selectTarget(state.currentTargetId);
+  };
+
   // Empty state
   if (state.targets.length === 0 && !state.currentTargetId) {
     return (
@@ -178,12 +196,19 @@ function AppContent() {
             onCreateSession={createNewSession}
           />
           <ContextBar analysis={state.currentAnalysis} />
-          <PlanCard
-            plan={state.currentPlan}
-            onEdit={(plan) => dispatch({ type: 'SET_PLAN', plan })}
+
+          {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
+          <RoundTimeline
+            aiMessages={state.aiMessages}
+            phase={state.phase}
+            currentAnalysis={state.currentAnalysis}
+            currentReplies={state.currentReplies}
+            isGenerating={state.phase === 'generating'}
+            onSelectReply={(reply) => selectReplyAction(reply)}
+            onCustomReply={sendCustomReply}
+            onRegenerate={handleRegenerate}
+            onFeedback={handleFeedback}
           />
-          <AgentSteps phase={state.phase} />
-          <AnalysisTabs analysis={state.currentAnalysis} />
         </div>
 
         {/* Right Panel - Chat Simulator */}
@@ -199,6 +224,8 @@ function AppContent() {
             targetName={currentTarget?.name || ''}
             onEditMessage={handleEditMessage}
             onDeleteMessage={handleDeleteMessage}
+            onAddScene={handleAddScene}
+            onImportMessages={handleImportMessages}
           />
           {state.phase === 'her_sent' && (
             <div className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-primary bg-[#e8f0fe] border-t border-[#d0dff5]">
@@ -212,21 +239,6 @@ function AppContent() {
           />
         </div>
       </div>
-
-      {/* Reply Popup */}
-      {state.phase === 'waiting_select' && state.currentReplies && (
-        <ReplyPopup
-          open={true}
-          replies={state.currentReplies}
-          onClose={() => {
-            dispatch({ type: 'GENERATE_FAILURE', error: '' });
-          }}
-          onSelectReply={(reply) => selectReplyAction(reply)}
-          onCustomReply={sendCustomReply}
-          onRegenerate={handleRegenerate}
-          onFeedback={handleFeedback}
-        />
-      )}
 
       {/* Modal */}
       <TargetModal

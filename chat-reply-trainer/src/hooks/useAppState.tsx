@@ -13,6 +13,7 @@ const initialState: AppState = {
   currentReplies: null,
   currentPlan: null,
   contextUsage: null,
+  aiMessages: [],
   error: null,
   modalOpen: false,
   editingTarget: null,
@@ -34,6 +35,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         currentReplies: null,
         currentPlan: null,
         contextUsage: null,
+        aiMessages: [],
         error: null,
         phase: 'idle',
       };
@@ -42,7 +44,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         messages: [...state.messages, action.message],
-        phase: 'her_sent',
+        phase: action.message.role === 'her' ? 'her_sent' : state.phase,
         error: null,
       };
     case 'TRIGGER_AI':
@@ -61,6 +63,12 @@ function reducer(state: AppState, action: AppAction): AppState {
     }
     case 'GENERATE_FAILURE':
       return { ...state, phase: 'idle', error: action.error };
+    case 'STREAM_ANALYSIS':
+      return { ...state, currentAnalysis: action.analysis };
+    case 'STREAM_REPLIES':
+      return { ...state, phase: 'waiting_select', currentReplies: action.replies, error: null };
+    case 'STREAM_DONE':
+      return { ...state, contextUsage: action.contextUsage };
     case 'SELECT_REPLY':
     case 'CUSTOM_REPLY':
       return {
@@ -73,6 +81,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case 'UPDATE_SESSIONS':
       return { ...state, sessions: action.sessions, currentSessionId: action.currentSessionId };
+    case 'SET_AI_MESSAGES':
+      return { ...state, aiMessages: action.aiMessages };
     case 'SET_PLAN':
       return { ...state, currentPlan: action.plan };
     case 'SET_ERROR':
@@ -103,6 +113,16 @@ function reducer(state: AppState, action: AppAction): AppState {
   }
 }
 
+async function loadSessionAiMessages(sessionId: string, dispatch: Dispatch<AppAction>) {
+  if (!sessionId) return;
+  try {
+    const aiMessages = await api.getSessionMessages(sessionId);
+    dispatch({ type: 'SET_AI_MESSAGES', aiMessages });
+  } catch {
+    dispatch({ type: 'SET_AI_MESSAGES', aiMessages: [] });
+  }
+}
+
 interface AppContextValue {
   state: AppState;
   dispatch: Dispatch<AppAction>;
@@ -112,7 +132,7 @@ interface AppContextValue {
   selectReplyAction: (reply: { id: number; text: string; strategy: string }) => Promise<void>;
   sendCustomReply: (text: string) => Promise<void>;
   createNewSession: () => Promise<void>;
-  switchSession: (sessionId: string) => void;
+  switchSession: (sessionId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -126,6 +146,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       api.getSessions(id),
     ]);
     dispatch({ type: 'SELECT_TARGET', targetId: id, messages, sessions });
+    const activeSession = sessions.find(s => s.is_active === 1);
+    if (activeSession) {
+      await loadSessionAiMessages(activeSession.id, dispatch);
+    }
   };
 
   const sendHerMessage = (text: string) => {
@@ -155,13 +179,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
     }
-    try {
-      const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
-      const data = await api.generateReply(sessionId, lastHerMsg?.text || '');
-      dispatch({ type: 'GENERATE_SUCCESS', data });
-    } catch (err: any) {
-      dispatch({ type: 'GENERATE_FAILURE', error: err.message });
-    }
+    const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
+    api.generateReplyStream(
+      sessionId,
+      lastHerMsg?.text || '',
+      (evt) => {
+        switch (evt.event) {
+          case 'analysis':
+            dispatch({ type: 'STREAM_ANALYSIS', analysis: evt.data });
+            break;
+          case 'plan':
+            dispatch({ type: 'SET_PLAN', plan: evt.data });
+            break;
+          case 'replies':
+            dispatch({ type: 'STREAM_REPLIES', replies: evt.data });
+            break;
+          case 'done':
+            dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage });
+            loadSessionAiMessages(sessionId, dispatch);
+            break;
+          case 'error':
+            dispatch({ type: 'GENERATE_FAILURE', error: evt.data.message });
+            break;
+        }
+      },
+      (err) => {
+        dispatch({ type: 'GENERATE_FAILURE', error: err.message });
+      },
+    );
   };
 
   const selectReplyAction = async (reply: { id: number; text: string; strategy: string }) => {
@@ -174,6 +219,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         session_id: state.currentSessionId, created_at: Date.now(),
       };
       dispatch({ type: 'SELECT_REPLY', message: msg });
+      // Refresh aiMessages to include the new round
+      await loadSessionAiMessages(state.currentSessionId, dispatch);
     } catch (err: any) {
       dispatch({ type: 'SET_ERROR', error: err.message });
     }
@@ -189,6 +236,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         session_id: state.currentSessionId, created_at: Date.now(),
       };
       dispatch({ type: 'CUSTOM_REPLY', message: msg });
+      await loadSessionAiMessages(state.currentSessionId, dispatch);
     } catch (err: any) {
       dispatch({ type: 'SET_ERROR', error: err.message });
     }
@@ -199,10 +247,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const session = await api.createSession(state.currentTargetId);
     const sessions = await api.getSessions(state.currentTargetId);
     dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: session.id });
+    dispatch({ type: 'SET_AI_MESSAGES', aiMessages: [] });
   };
 
-  const switchSession = (sessionId: string) => {
+  const switchSession = async (sessionId: string) => {
     dispatch({ type: 'UPDATE_SESSIONS', sessions: state.sessions, currentSessionId: sessionId });
+    await loadSessionAiMessages(sessionId, dispatch);
   };
 
   return (

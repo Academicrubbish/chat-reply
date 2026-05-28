@@ -31,9 +31,10 @@ export function buildSystemPrompt(params: PromptParams): string {
     friendship: '维持友谊关系',
   };
 
-  const chatHistory = recentMessages.map(m =>
-    `${m.role === 'her' ? '对方' : '我'}：${m.text}`
-  ).join('\n');
+  const chatHistory = recentMessages.map(m => {
+    if (m.role === 'scene') return `【场景】${m.text}`;
+    return `${m.role === 'her' ? '对方' : '我'}：${m.text}`;
+  }).join('\n');
 
   return `你是一个专业的社交聊天辅导AI，帮助用户分析对方消息并生成回复建议。
 

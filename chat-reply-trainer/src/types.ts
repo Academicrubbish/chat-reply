@@ -14,9 +14,9 @@ export interface ChatTarget {
 export interface ChatMessage {
   id: string;
   target_id: string;
-  role: 'her' | 'me';
+  role: 'her' | 'me' | 'scene';
   text: string;
-  source: '手动输入' | 'AI建议' | '自定义回复' | '历史记录';
+  source: '手动输入' | 'AI建议' | '自定义回复' | '历史记录' | '场景补充';
   strategy: string | null;
   session_id: string | null;
   created_at: number;
@@ -86,6 +86,7 @@ export interface AppState {
   currentReplies: ReplyOption[] | null;
   currentPlan: { goal: string; nextStep: string } | null;
   contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number } | null;
+  aiMessages: AIMessage[];
   error: string | null;
   modalOpen: boolean;
   editingTarget: ChatTarget | null;
@@ -108,4 +109,8 @@ export type AppAction =
   | { type: 'ADD_TARGET'; target: ChatTarget }
   | { type: 'UPDATE_TARGET'; target: ChatTarget }
   | { type: 'EDIT_MESSAGE'; id: string; text: string }
-  | { type: 'DELETE_MESSAGE'; id: string };
+  | { type: 'DELETE_MESSAGE'; id: string }
+  | { type: 'SET_AI_MESSAGES'; aiMessages: AIMessage[] }
+  | { type: 'STREAM_ANALYSIS'; analysis: AnalysisData }
+  | { type: 'STREAM_REPLIES'; replies: ReplyOption[] }
+  | { type: 'STREAM_DONE'; contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number } };

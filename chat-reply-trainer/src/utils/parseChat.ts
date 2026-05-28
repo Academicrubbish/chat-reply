@@ -1,5 +1,5 @@
 export interface ParsedMessage {
-  role: 'her' | 'me';
+  role: 'her' | 'me' | 'scene';
   text: string;
 }
 
@@ -14,12 +14,20 @@ const FORMAT1 = /^(她|他|我)[：:]\s*(.*)$/;
 const FORMAT2 = /^【(她|他|我)】\s*(.*)$/;
 // Format 3: 她/他 > xxx / 我 > xxx
 const FORMAT3 = /^(她|他|我)\s*>\s*(.*)$/;
+// Scene format: 场景：xxx / 【场景】xxx
+const FORMAT_SCENE = /^场景[：:]\s*(.*)$/;
+const FORMAT_SCENE_BRACKET = /^【场景】\s*(.*)$/;
 // WeChat export header: 昵称 HH:MM or HH:MM:SS
 const WECHAT_HEADER = /^(.+?)\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$/;
 
 const ALL_FORMATS = [FORMAT1, FORMAT2, FORMAT3];
 
-function tryParseLine(line: string): { role: 'her' | 'me'; text: string } | null {
+function tryParseLine(line: string): { role: 'her' | 'me' | 'scene'; text: string } | null {
+  // Scene formats first
+  const sceneMatch = line.match(FORMAT_SCENE) || line.match(FORMAT_SCENE_BRACKET);
+  if (sceneMatch) {
+    return { role: 'scene', text: sceneMatch[1] };
+  }
   for (const regex of ALL_FORMATS) {
     const match = line.match(regex);
     if (match) {
@@ -108,8 +116,10 @@ export function parseChatWithMeta(raw: string, herName?: string): ParseResult {
   const lines = raw.split('\n').map(l => l.trimEnd());
   const warnings: string[] = [];
 
-  // Check if any line matches Format 1-3
-  const hasSpeakerPrefix = lines.some(l => ALL_FORMATS.some(r => r.test(l)));
+  // Check if any line matches Format 1-3 or scene format
+  const hasSpeakerPrefix = lines.some(l =>
+    ALL_FORMATS.some(r => r.test(l)) || FORMAT_SCENE.test(l) || FORMAT_SCENE_BRACKET.test(l)
+  );
 
   if (!hasSpeakerPrefix) {
     // Try WeChat export mode
