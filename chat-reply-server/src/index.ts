@@ -3,11 +3,10 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
-import './db';
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
-import db from './db';
+import { initDb, default as db } from './db';
 import { buildSystemPrompt } from './prompt';
 import { chatCompletion, chatCompletionStream } from './llm';
 
@@ -410,7 +409,8 @@ app.post('/api/sessions/:sessionId/feedback', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await initDb();
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
