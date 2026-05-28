@@ -61,6 +61,59 @@ export const generateReply = (sessionId: string, herMessage: string) =>
     body: JSON.stringify({ herMessage }),
   });
 
+export type SSEEvent = {
+  event: string;
+  data: any;
+};
+
+export function generateReplyStream(
+  sessionId: string,
+  herMessage: string,
+  onEvent: (evt: SSEEvent) => void,
+  onError?: (err: Error) => void,
+): AbortController {
+  const ctrl = new AbortController();
+  fetch(`${BASE}/sessions/${sessionId}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ herMessage }),
+    signal: ctrl.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      onError?.(new Error(body.error || `请求失败 (${res.status})`));
+      return;
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      let currentEvent = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            onEvent({ event: currentEvent, data });
+          } catch {
+            // skip
+          }
+        }
+      }
+    }
+  }).catch(err => {
+    if (err.name !== 'AbortError') onError?.(err);
+  });
+  return ctrl;
+}
+
 export const selectReply = (sessionId: string, replyId: number) =>
   request<{ success: boolean }>(`/sessions/${sessionId}/select-reply`, {
     method: 'POST',
