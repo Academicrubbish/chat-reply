@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Collapse, Tag, Card, Button, Space, Input, Empty, Spin } from 'antd';
+import { Collapse, Tag, Card, Button, Space, Input, Spin, Tooltip } from 'antd';
 import {
   LikeOutlined, DislikeOutlined,
   ReloadOutlined, AimOutlined, SendOutlined,
+  CheckCircleFilled, LoadingOutlined,
 } from '@ant-design/icons';
-import type { AIMessage, AnalysisData, ReplyOption, AppPhase } from '../types';
+import type { AIMessage, AnalysisData, ReplyOption, AppPhase, GenerationStep, FavorabilityRecord } from '../types';
 
 interface RoundTimelineProps {
   aiMessages: AIMessage[];
@@ -12,6 +13,9 @@ interface RoundTimelineProps {
   currentAnalysis: AnalysisData | null;
   currentReplies: ReplyOption[] | null;
   isGenerating: boolean;
+  generationStep: GenerationStep;
+  streamingText: string;
+  favorabilityHistory: FavorabilityRecord[];
   onSelectReply: (reply: ReplyOption) => void;
   onCustomReply: (text: string) => void;
   onRegenerate: () => void;
@@ -44,6 +48,13 @@ function parseAiMessages(aiMessages: AIMessage[]): RoundData[] {
   return rounds;
 }
 
+/** Extract signalText from streaming JSON — only show signalText content */
+function formatStreamingText(raw: string): string {
+  const match = raw.match(/"signalText"\s*:\s*"([\s\S]*?)"/);
+  if (match) return match[1].replace(/\\n/g, ' ').trim();
+  return '';
+}
+
 const strategyTagColor: Record<string, string> = {
   '魔趣法则': 'blue',
   '平衡艺术': 'green',
@@ -52,10 +63,72 @@ const strategyTagColor: Record<string, string> = {
   '释放性信息': 'orange',
 };
 
+const STEP_ITEMS = [
+  { key: 'analyze', label: '分析消息' },
+  { key: 'generating', label: '识别信号与匹配策略' },
+  { key: 'parsing', label: '生成回复' },
+  { key: 'done', label: '完成' },
+];
+
+function getStepIndex(step: GenerationStep): number {
+  const idx = STEP_ITEMS.findIndex(s => s.key === step);
+  return idx >= 0 ? idx : 0;
+}
+
+function ThoughtChainSteps({ currentStep }: { currentStep: GenerationStep }) {
+  const activeIdx = getStepIndex(currentStep);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '4px 0' }}>
+      {STEP_ITEMS.map((item, idx) => {
+        const isDone = idx < activeIdx;
+        const isActive = idx === activeIdx;
+
+        return (
+          <div key={item.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            {/* Timeline dot + line */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 36 }}>
+              {isDone ? (
+                <CheckCircleFilled style={{ fontSize: 16, color: '#52c41a' }} />
+              ) : isActive ? (
+                <LoadingOutlined style={{ fontSize: 16, color: '#1677ff' }} spin />
+              ) : (
+                <div style={{
+                  width: 16, height: 16, borderRadius: '50%',
+                  border: '2px solid #d9d9d9', background: '#fff',
+                }} />
+              )}
+              {idx < STEP_ITEMS.length - 1 && (
+                <div style={{
+                  width: 2, flex: 1, minHeight: 14,
+                  background: isDone ? '#52c41a' : '#f0f0f0',
+                  marginTop: 2,
+                }} />
+              )}
+            </div>
+            {/* Label */}
+            <span style={{
+              fontSize: 13, lineHeight: '20px', paddingTop: isDone || isActive ? 0 : 0,
+              color: isDone ? '#52c41a' : isActive ? '#1677ff' : '#999',
+              fontWeight: isActive ? 600 : 400,
+            }}>
+              {item.label}
+              {isActive && <span style={{ marginLeft: 6, fontSize: 11, color: '#999' }}>处理中...</span>}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function CurrentRoundCard({
   analysis,
   replies,
   isGenerating,
+  generationStep,
+  streamingText,
+  favorabilityHistory,
   onSelectReply,
   onCustomReply,
   onRegenerate,
@@ -64,6 +137,9 @@ function CurrentRoundCard({
   analysis: AnalysisData | null;
   replies: ReplyOption[] | null;
   isGenerating: boolean;
+  generationStep: GenerationStep;
+  streamingText: string;
+  favorabilityHistory: FavorabilityRecord[];
   onSelectReply: (reply: ReplyOption) => void;
   onCustomReply: (text: string) => void;
   onRegenerate: () => void;
@@ -71,25 +147,31 @@ function CurrentRoundCard({
 }) {
   const [customText, setCustomText] = useState('');
 
+  // Show generation steps when generating (before analysis arrives)
   if (isGenerating && !analysis) {
     return (
       <Card size="small" style={{ borderLeft: '3px solid #3b5998' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Spin size="small" />
-            <span style={{ fontSize: 12, color: '#666' }}>正在分析消息...</span>
-          </div>
-        </div>
+        <ThoughtChainSteps currentStep={generationStep} />
+        {streamingText && generationStep === 'parsing' && (() => {
+          const displayText = formatStreamingText(streamingText);
+          return displayText ? (
+            <div style={{
+              marginTop: 8, padding: '8px 10px', background: '#f6f8fa',
+              borderRadius: 6, fontSize: 12, color: '#333', lineHeight: 1.8,
+              maxHeight: 200, overflow: 'hidden',
+            }}>
+              {displayText}
+              <span style={{ animation: 'blink 1s infinite', color: '#1677ff' }}>|</span>
+            </div>
+          ) : null;
+        })()}
       </Card>
     );
   }
 
+  // Don't render anything when idle with no data
   if (!analysis && !replies) {
-    return (
-      <Card size="small" style={{ borderLeft: '3px solid #ddd' }}>
-        <Empty description="发送对方消息后点击「AI 辅助」" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      </Card>
-    );
+    return null;
   }
 
   const handleCustomSend = () => {
@@ -99,6 +181,11 @@ function CurrentRoundCard({
       setCustomText('');
     }
   };
+
+  const currentFav = analysis?.favorability ?? 0;
+  const currentFavReason = analysis?.favorabilityReason || '';
+  const prevFav = favorabilityHistory.length > 1 ? favorabilityHistory[favorabilityHistory.length - 2]?.value : null;
+  const favDelta = prevFav !== null ? currentFav - prevFav : null;
 
   return (
     <Card
@@ -111,6 +198,18 @@ function CurrentRoundCard({
               <Spin size="small" />
               <span style={{ fontSize: 11, color: '#999' }}>生成回复中...</span>
             </span>
+          )}
+          {analysis && (
+            <Tooltip title={currentFavReason ? `好感度：${currentFavReason}` : undefined}>
+              <Tag color={currentFav >= 70 ? 'green' : currentFav >= 40 ? 'orange' : 'red'} style={{ marginLeft: 'auto', cursor: 'default' }}>
+                {`好感度 ${currentFav}`}
+                {favDelta !== null && favDelta !== 0 && (
+                  <span style={{ marginLeft: 4 }}>
+                    {favDelta > 0 ? `+${favDelta}` : `${favDelta}`}
+                  </span>
+                )}
+              </Tag>
+            </Tooltip>
           )}
         </div>
       }
@@ -137,7 +236,7 @@ function CurrentRoundCard({
 
       {/* Reply options */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {replies.map(reply => (
+        {(replies ?? []).map(reply => (
           <div
             key={reply.id}
             onClick={() => onSelectReply(reply)}
@@ -197,14 +296,15 @@ export default function RoundTimeline({
   currentAnalysis,
   currentReplies,
   isGenerating,
+  generationStep,
+  streamingText,
+  favorabilityHistory,
   onSelectReply,
   onCustomReply,
   onRegenerate,
   onFeedback,
 }: RoundTimelineProps) {
   const historicalRounds = parseAiMessages(aiMessages);
-  // The last round in aiMessages may overlap with currentAnalysis/currentReplies
-  // Remove the last historical round if we're in waiting_select (it's the current one)
   const displayRounds = phase === 'waiting_select' && currentAnalysis && currentReplies
     ? historicalRounds.slice(0, -1)
     : historicalRounds;
@@ -218,6 +318,13 @@ export default function RoundTimeline({
           {round.analysis.strategy}
         </Tag>
         {round.analysis.signal && <Tag color="blue">{round.analysis.signal}</Tag>}
+        {round.analysis.favorability != null && (
+          <Tooltip title={round.analysis.favorabilityReason || undefined}>
+            <Tag color={round.analysis.favorability >= 70 ? 'green' : round.analysis.favorability >= 40 ? 'orange' : 'red'}>
+              好感度 {round.analysis.favorability}
+            </Tag>
+          </Tooltip>
+        )}
       </div>
     ),
     children: (
@@ -230,6 +337,11 @@ export default function RoundTimeline({
         {round.analysis.signalText && (
           <div style={{ fontSize: 12, color: '#333', lineHeight: 1.5, marginBottom: 6 }}>
             {round.analysis.signalText}
+          </div>
+        )}
+        {round.analysis.favorabilityReason && (
+          <div style={{ fontSize: 11, color: '#52c41a', lineHeight: 1.4, marginBottom: 6 }}>
+            好感度分析：{round.analysis.favorabilityReason}
           </div>
         )}
         {round.analysis.emotions?.length > 0 && (
@@ -273,6 +385,9 @@ export default function RoundTimeline({
         analysis={currentAnalysis}
         replies={currentReplies}
         isGenerating={isGenerating}
+        generationStep={generationStep}
+        streamingText={streamingText}
+        favorabilityHistory={favorabilityHistory}
         onSelectReply={onSelectReply}
         onCustomReply={onCustomReply}
         onRegenerate={onRegenerate}

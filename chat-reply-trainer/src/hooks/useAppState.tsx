@@ -1,9 +1,12 @@
-import { createContext, useContext, useReducer, type Dispatch, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useRef, useEffect, type Dispatch, type ReactNode } from 'react';
 import type { AppState, AppAction, ChatMessage } from '../types';
 import * as api from '../services/api';
 
+const STEP_ORDER: Record<string, number> = { idle: 0, analyze: 1, generating: 2, parsing: 3, done: 4 };
+
 const initialState: AppState = {
   phase: 'idle',
+  generationStep: 'idle',
   targets: [],
   currentTargetId: null,
   messages: [],
@@ -14,9 +17,11 @@ const initialState: AppState = {
   currentPlan: null,
   contextUsage: null,
   aiMessages: [],
+  streamingText: '',
   error: null,
   modalOpen: false,
   editingTarget: null,
+  favorabilityHistory: [],
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -38,6 +43,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         aiMessages: [],
         error: null,
         phase: 'idle',
+        generationStep: 'idle',
+        streamingText: '',
+        favorabilityHistory: [],
       };
     }
     case 'SEND_HER_MESSAGE':
@@ -48,33 +56,62 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: null,
       };
     case 'TRIGGER_AI':
-      return { ...state, phase: 'generating', error: null };
+      return { ...state, phase: 'generating', generationStep: 'analyze', streamingText: '', error: null };
     case 'GENERATE_SUCCESS': {
       const { analysis, plan, contextUsage, replies } = action.data;
+      const newHistory = analysis
+        ? [...state.favorabilityHistory, {
+            value: analysis.favorability,
+            reason: analysis.favorabilityReason || '',
+            round: state.favorabilityHistory.length + 1,
+          }]
+        : state.favorabilityHistory;
       return {
         ...state,
         phase: 'waiting_select',
+        generationStep: 'done',
         currentAnalysis: analysis,
         currentReplies: replies,
         currentPlan: plan,
         contextUsage,
         error: null,
+        favorabilityHistory: newHistory,
       };
     }
     case 'GENERATE_FAILURE':
-      return { ...state, phase: 'idle', error: action.error };
-    case 'STREAM_ANALYSIS':
-      return { ...state, currentAnalysis: action.analysis };
+      return { ...state, phase: 'idle', generationStep: 'idle', streamingText: '', error: action.error };
+    case 'STREAM_ANALYSIS': {
+      const newHistory = [...state.favorabilityHistory, {
+        value: action.analysis.favorability,
+        reason: action.analysis.favorabilityReason || '',
+        round: state.favorabilityHistory.length + 1,
+      }];
+      return { ...state, currentAnalysis: action.analysis, favorabilityHistory: newHistory };
+    }
+    case 'STREAM_DELTA': {
+      // Only advance step forward, never backward — prevents skipping 'generating' on fast responses
+      const nextStep = (STEP_ORDER[state.generationStep] ?? 0) < STEP_ORDER['parsing']
+        ? 'parsing' as const
+        : state.generationStep;
+      return {
+        ...state,
+        generationStep: nextStep,
+        streamingText: state.streamingText + action.text,
+      };
+    }
     case 'STREAM_REPLIES':
-      return { ...state, phase: 'waiting_select', currentReplies: action.replies, error: null };
+      return { ...state, phase: 'waiting_select', generationStep: 'done', currentReplies: action.replies, streamingText: '', error: null };
     case 'STREAM_DONE':
-      return { ...state, contextUsage: action.contextUsage };
+      return { ...state, phase: 'waiting_select', generationStep: 'done', contextUsage: action.contextUsage };
+    case 'SET_GENERATION_STEP':
+      return { ...state, generationStep: action.step };
     case 'SELECT_REPLY':
     case 'CUSTOM_REPLY':
       return {
         ...state,
         messages: [...state.messages, action.message],
         phase: 'idle',
+        generationStep: 'idle',
         currentAnalysis: null,
         currentReplies: null,
         error: null,
@@ -139,8 +176,15 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const activeAbortRef = useRef<AbortController | null>(null);
+
+  // Cleanup: abort any in-flight SSE on unmount
+  useEffect(() => () => { activeAbortRef.current?.abort(); }, []);
 
   const selectTarget = async (id: string) => {
+    // Cancel any in-flight generation before switching target
+    activeAbortRef.current?.abort();
+    activeAbortRef.current = null;
     const [messages, sessions] = await Promise.all([
       api.getMessages(id),
       api.getSessions(id),
@@ -165,6 +209,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const triggerAI = async () => {
     if (!state.currentTargetId) return;
+    // Cancel any previous in-flight request
+    activeAbortRef.current?.abort();
     dispatch({ type: 'TRIGGER_AI' });
 
     let sessionId = state.currentSessionId;
@@ -180,11 +226,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
     const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
-    api.generateReplyStream(
+
+    // 2s timeout: transition from 'analyze' to 'generating' if no delta yet
+    const analyzeTimer = setTimeout(() => {
+      dispatch({ type: 'SET_GENERATION_STEP', step: 'generating' });
+    }, 2000);
+
+    // Heartbeat timeout: 15s without any event = connection lost
+    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+    const resetHeartbeat = () => {
+      if (heartbeatTimer) clearTimeout(heartbeatTimer);
+      heartbeatTimer = setTimeout(() => {
+        dispatch({ type: 'GENERATE_FAILURE', error: '连接超时，请重试' });
+      }, 15000);
+    };
+    resetHeartbeat();
+
+    const ctrl = api.generateReplyStream(
       sessionId,
       lastHerMsg?.text || '',
       (evt) => {
+        resetHeartbeat();
+        if (evt.event !== 'heartbeat' && evt.event !== 'delta') {
+          console.log('[SSE]', evt.event, evt.data);
+        }
         switch (evt.event) {
+          case 'step':
+            // Step transitions are driven by delta events on frontend; ignore backend step events
+            break;
+          case 'delta':
+            clearTimeout(analyzeTimer);
+            dispatch({ type: 'STREAM_DELTA', text: evt.data.text });
+            break;
           case 'analysis':
             dispatch({ type: 'STREAM_ANALYSIS', analysis: evt.data });
             break;
@@ -195,18 +268,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: 'STREAM_REPLIES', replies: evt.data });
             break;
           case 'done':
+            clearTimeout(analyzeTimer);
+            if (heartbeatTimer) clearTimeout(heartbeatTimer);
             dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage });
             loadSessionAiMessages(sessionId, dispatch);
             break;
           case 'error':
+            clearTimeout(analyzeTimer);
+            if (heartbeatTimer) clearTimeout(heartbeatTimer);
             dispatch({ type: 'GENERATE_FAILURE', error: evt.data.message });
             break;
         }
       },
       (err) => {
-        dispatch({ type: 'GENERATE_FAILURE', error: err.message });
+        clearTimeout(analyzeTimer);
+        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+        // Don't show error for intentional aborts (target switch, new request)
+        if (err.name !== 'AbortError') {
+          dispatch({ type: 'GENERATE_FAILURE', error: err.message });
+        }
       },
     );
+    activeAbortRef.current = ctrl;
   };
 
   const selectReplyAction = async (reply: { id: number; text: string; strategy: string }) => {
