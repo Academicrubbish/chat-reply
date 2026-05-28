@@ -184,7 +184,7 @@ function AppContent() {
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel - AI Console */}
-        <div className="w-[70%] min-w-150 bg-white border-r border-border flex flex-col overflow-hidden">
+        <div className="flex-1 min-w-0 bg-white border-r border-border flex flex-col overflow-hidden">
           <PersonCard
             target={currentTarget}
             onEdit={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
@@ -215,7 +215,7 @@ function AppContent() {
         </div>
 
         {/* Right Panel - Chat Simulator */}
-        <div className="w-[30%] min-w-[320px] max-w-105 flex flex-col bg-chat-bg">
+        <div className="w-[30%] max-w-105 flex flex-col bg-chat-bg">
           <ChatHeader
             targetName={currentTarget?.name || ''}
             onAIAssist={triggerAI}
