@@ -154,13 +154,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(session.target_id) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
 
-    // Save her message
-    const msgId = uuid();
     const now = Date.now();
-    db.prepare(`INSERT INTO chat_messages (id, target_id, role, text, source, strategy, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(msgId, target.id, 'her', herMessage.trim(), '手动输入', null, session.id, now);
 
-    // Read context
+    // Read context (her message already saved by frontend via sendHerMessage)
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(target.id).reverse();
     const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(session.id);
 
@@ -208,13 +204,22 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
     // Step 1: Analyze
     send('step', { step: 'analyze' });
 
-    // Step 2: Call LLM with streaming
+    // Step 2: Call LLM with streaming + heartbeat
     let raw = '';
     send('step', { step: 'generating' });
 
-    for await (const delta of chatCompletionStream(conversationMessages)) {
-      raw += delta;
-      send('delta', { text: delta });
+    // Heartbeat timer: send every 2s while stream is active
+    const heartbeatTimer = setInterval(() => {
+      send('heartbeat', { ts: Date.now() });
+    }, 2000);
+
+    try {
+      for await (const delta of chatCompletionStream(conversationMessages)) {
+        raw += delta;
+        send('delta', { text: delta });
+      }
+    } finally {
+      clearInterval(heartbeatTimer);
     }
 
     // Step 3: Parse response
@@ -226,15 +231,43 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
     try {
       // Strip markdown code fences
       let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
-      // Extract JSON object
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('AI 未返回有效 JSON\n原始响应: ' + raw.slice(0, 200));
-      let jsonStr = jsonMatch[0]
-        .replace(/,\s*([}\]])/g, '$1')
-        .replace(/\/\/.*$/gm, '')
+
+      // Remove Chinese quotes (U+201C/U+201D) — they break JSON parsing when unescaped inside string values
+      cleaned = cleaned.replace(/[“”]/g, '');
+
+      // Strategy 1: regex — first { to last } (handles trailing garbage)
+      let jsonStr = '';
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
+      } else if (firstBrace !== -1) {
+        // Truncated: no closing brace
+        jsonStr = cleaned.slice(firstBrace);
+      } else {
+        throw new Error('AI 未返回有效 JSON\n原始响应: ' + raw.slice(0, 200));
+      }
+
+      // Clean control chars and trailing commas
+      jsonStr = jsonStr
         .replace(/[\x00-\x1f]/g, '')
-        .replace(/'/g, '"');
-      parsed = JSON.parse(jsonStr);
+        .replace(/,\s*([}\]])/g, '$1');
+
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        // Try to salvage truncated JSON
+        let salvage = jsonStr;
+        const quoteCount = (salvage.match(/"/g) || []).length;
+        if (quoteCount % 2 !== 0) salvage += '"';
+        const openBrackets = (salvage.match(/\[/g) || []).length - (salvage.match(/\]/g) || []).length;
+        const openBraces = (salvage.match(/\{/g) || []).length - (salvage.match(/\}/g) || []).length;
+        for (let i = 0; i < openBrackets; i++) salvage += ']';
+        for (let i = 0; i < openBraces; i++) salvage += '}';
+        salvage = salvage.replace(/,\s*([}\]])/g, '$1');
+        parsed = JSON.parse(salvage);
+        console.log('[LLM] Salvaged truncated JSON successfully');
+      }
     } catch (parseErr: any) {
       console.error('[LLM Parse Error]', parseErr.message, '\nRaw:', raw.slice(0, 500));
       send('error', { message: `AI 响应解析失败: ${parseErr.message}` });
@@ -242,14 +275,16 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
       return;
     }
 
-    // Send structured events
+    console.log('[LLM Parsed] keys:', Object.keys(parsed), 'replies count:', parsed.replies?.length ?? 0);
+
+    // Send structured events (always send replies even if empty, so frontend knows generation is done)
     if (parsed.analysis) send('analysis', parsed.analysis);
     if (parsed.plan) send('plan', parsed.plan);
 
     const maxTokens = 8000;
     const contextUsage = { estimatedTokens, maxTokens, percentage: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100) };
 
-    if (parsed.replies) send('replies', parsed.replies);
+    send('replies', parsed.replies || []);
 
     // Save to DB
     const userAiMsgId = uuid();

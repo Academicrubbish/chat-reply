@@ -204,6 +204,9 @@ function AppContent() {
             currentAnalysis={state.currentAnalysis}
             currentReplies={state.currentReplies}
             isGenerating={state.phase === 'generating'}
+            generationStep={state.generationStep}
+            streamingText={state.streamingText}
+            favorabilityHistory={state.favorabilityHistory}
             onSelectReply={(reply) => selectReplyAction(reply)}
             onCustomReply={sendCustomReply}
             onRegenerate={handleRegenerate}

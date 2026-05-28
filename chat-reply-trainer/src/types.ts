@@ -50,6 +50,15 @@ export interface AnalysisData {
   emotions: string[];
   tip: string;
   favorability: number;
+  favorabilityReason: string;
+}
+
+export type GenerationStep = 'idle' | 'analyze' | 'generating' | 'parsing' | 'done';
+
+export interface FavorabilityRecord {
+  value: number;
+  reason: string;
+  round: number;
 }
 
 export interface ReplyOption {
@@ -77,6 +86,7 @@ export type AppPhase = 'idle' | 'her_sent' | 'generating' | 'waiting_select';
 
 export interface AppState {
   phase: AppPhase;
+  generationStep: GenerationStep;
   targets: ChatTarget[];
   currentTargetId: string | null;
   messages: ChatMessage[];
@@ -87,9 +97,11 @@ export interface AppState {
   currentPlan: { goal: string; nextStep: string } | null;
   contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number } | null;
   aiMessages: AIMessage[];
+  streamingText: string;
   error: string | null;
   modalOpen: boolean;
   editingTarget: ChatTarget | null;
+  favorabilityHistory: FavorabilityRecord[];
 }
 
 export type AppAction =
@@ -112,5 +124,7 @@ export type AppAction =
   | { type: 'DELETE_MESSAGE'; id: string }
   | { type: 'SET_AI_MESSAGES'; aiMessages: AIMessage[] }
   | { type: 'STREAM_ANALYSIS'; analysis: AnalysisData }
+  | { type: 'STREAM_DELTA'; text: string }
   | { type: 'STREAM_REPLIES'; replies: ReplyOption[] }
-  | { type: 'STREAM_DONE'; contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number } };
+  | { type: 'STREAM_DONE'; contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number } }
+  | { type: 'SET_GENERATION_STEP'; step: GenerationStep };
