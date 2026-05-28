@@ -140,11 +140,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const triggerAI = async () => {
-    if (!state.currentSessionId) return;
+    if (!state.currentTargetId) return;
     dispatch({ type: 'TRIGGER_AI' });
+
+    let sessionId = state.currentSessionId;
+    if (!sessionId) {
+      try {
+        const session = await api.createSession(state.currentTargetId);
+        const sessions = await api.getSessions(state.currentTargetId);
+        dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: session.id });
+        sessionId = session.id;
+      } catch (err: any) {
+        dispatch({ type: 'GENERATE_FAILURE', error: '创建会话失败: ' + err.message });
+        return;
+      }
+    }
     try {
       const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
-      const data = await api.generateReply(state.currentSessionId, lastHerMsg?.text || '');
+      const data = await api.generateReply(sessionId, lastHerMsg?.text || '');
       dispatch({ type: 'GENERATE_SUCCESS', data });
     } catch (err: any) {
       dispatch({ type: 'GENERATE_FAILURE', error: err.message });
