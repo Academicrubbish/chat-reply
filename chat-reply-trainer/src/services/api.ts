@@ -97,9 +97,12 @@ export function generateReplyStream(
   onError?: (err: Error) => void,
 ): AbortController {
   const ctrl = new AbortController();
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   fetch(`${BASE}/sessions/${sessionId}/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ herMessage, provider }),
     signal: ctrl.signal,
   }).then(async (res) => {

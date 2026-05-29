@@ -50,7 +50,7 @@ export default function TargetSelector({ targets, currentId, onSelect, onCreateN
 
   return (
     <Dropdown menu={{ items: menuItems, selectedKeys: currentId ? [currentId] : [] }} trigger={['click']}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
+      <div data-tour-id="target-selector" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
         <Avatar size={24} style={{ backgroundColor: '#3b5998', fontSize: 12 }}>
           {current ? current.name.charAt(0).toUpperCase() : '?'}
         </Avatar>

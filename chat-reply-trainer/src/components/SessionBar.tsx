@@ -34,7 +34,7 @@ const SessionBar: React.FC<SessionBarProps> = ({
     : 0;
 
   return (
-    <div style={{ padding: '8px 20px', background: '#fff', borderBottom: '1px solid #ebeef5', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div data-tour-id="session-bar" style={{ padding: '8px 20px', background: '#fff', borderBottom: '1px solid #ebeef5', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <Space>
         <span style={{ fontSize: 13, fontWeight: 'bold', color: '#3b5998', background: '#e8f0fe', padding: '2px 10px', borderRadius: 10 }}>
           窗口 #{displayIndex || '-'}

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Button, Empty, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { LogoutOutlined, PlusOutlined } from '@ant-design/icons';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import * as api from './services/api';
 import { parseChatWithMeta } from './utils/parseChat';
 import type { ParsedMessage } from './utils/parseChat';
+import { shouldStartTour, startTour } from './utils/tourGuide';
 import ErrorBoundary from './components/ErrorBoundary';
 import SetupPage from './components/SetupPage';
 import LoginPage from './components/LoginPage';
@@ -31,6 +32,14 @@ function AppContent() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Auto-start guided tour only for newly registered users
+  useEffect(() => {
+    if (state.targets.length > 0 && shouldStartTour()) {
+      const timer = setTimeout(startTour, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [state.targets.length]);
 
   // Load targets on mount
   useEffect(() => {
@@ -186,6 +195,13 @@ function AppContent() {
           onCreateNew={() => dispatch({ type: 'OPEN_MODAL' })}
           onDelete={handleDeleteTarget}
         />
+        <Button
+          size="small"
+          icon={<LogoutOutlined />}
+          onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
+        >
+          退出
+        </Button>
       </div>
 
       {/* Mobile Tab Bar */}
@@ -209,6 +225,7 @@ function AppContent() {
         {/* Left Panel - AI Console */}
         <div
           className="flex-1 min-w-0 bg-white border-r border-border flex flex-col overflow-hidden"
+          data-tour-id="ai-panel"
           style={isMobile ? { display: mobileTab === 'ai' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', borderRight: 'none' } : undefined}
         >
           <PersonCard

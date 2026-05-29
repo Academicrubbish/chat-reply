@@ -110,47 +110,47 @@ app.get('/api/models', (_req: Request, res: Response) => {
 });
 
 // ===== Targets CRUD =====
-app.get('/api/targets', (_req: Request, res: Response) => {
-  const targets = db.prepare('SELECT * FROM chat_targets ORDER BY created_at DESC').all();
+app.get('/api/targets', (req: any, res: Response) => {
+  const targets = db.prepare('SELECT * FROM chat_targets WHERE user_id = ? ORDER BY created_at DESC').all(req.user.userId);
   res.json(targets);
 });
 
-app.post('/api/targets', (req: Request, res: Response) => {
+app.post('/api/targets', (req: any, res: Response) => {
   const { name, meet_scene, persona, hobbies, recent_chats, tone_level, goal_intent, forbidden_topics } = req.body;
   if (!name?.trim()) { res.status(400).json({ error: '名字不能为空' }); return; }
   const id = uuid();
   const now = Date.now();
   db.prepare(`
-    INSERT INTO chat_targets (id, name, meet_scene, persona, hobbies, recent_chats, tone_level, goal_intent, forbidden_topics, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name.trim(), meet_scene || '', persona || '', hobbies || '', recent_chats || '', tone_level || 'moderate', goal_intent || 'pursuing', forbidden_topics || '', now);
+    INSERT INTO chat_targets (id, user_id, name, meet_scene, persona, hobbies, recent_chats, tone_level, goal_intent, forbidden_topics, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, req.user.userId, name.trim(), meet_scene || '', persona || '', hobbies || '', recent_chats || '', tone_level || 'moderate', goal_intent || 'pursuing', forbidden_topics || '', now);
   const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(id);
   res.status(201).json(target);
 });
 
-app.get('/api/targets/:id', (req: Request, res: Response) => {
-  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.id);
+app.get('/api/targets/:id', (req: any, res: Response) => {
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.id, req.user.userId);
   if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   res.json(target);
 });
 
-app.put('/api/targets/:id', (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.id);
+app.put('/api/targets/:id', (req: any, res: Response) => {
+  const existing = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.id, req.user.userId);
   if (!existing) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   const { name, meet_scene, persona, hobbies, recent_chats, tone_level, goal_intent, forbidden_topics } = req.body;
   db.prepare(`
     UPDATE chat_targets SET name = ?, meet_scene = ?, persona = ?, hobbies = ?, recent_chats = ?, tone_level = ?, goal_intent = ?, forbidden_topics = ?
-    WHERE id = ?
+    WHERE id = ? AND user_id = ?
   `).run(
     name?.trim() ?? existing.name, meet_scene ?? existing.meet_scene, persona ?? existing.persona,
     hobbies ?? existing.hobbies, recent_chats ?? existing.recent_chats, tone_level ?? existing.tone_level,
-    goal_intent ?? existing.goal_intent, forbidden_topics ?? existing.forbidden_topics, req.params.id
+    goal_intent ?? existing.goal_intent, forbidden_topics ?? existing.forbidden_topics, req.params.id, req.user.userId
   );
   res.json(db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.id));
 });
 
-app.delete('/api/targets/:id', (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.id);
+app.delete('/api/targets/:id', (req: any, res: Response) => {
+  const existing = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.id, req.user.userId);
   if (!existing) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   db.transaction(() => {
     const sessionIds = db.prepare('SELECT id FROM ai_sessions WHERE target_id = ?').all(req.params.id).map((s: any) => s.id);
@@ -165,16 +165,26 @@ app.delete('/api/targets/:id', (req: Request, res: Response) => {
 });
 
 // ===== Messages =====
-app.get('/api/targets/:id/messages', (req: Request, res: Response) => {
+function verifyTargetOwnership(targetId: string, userId: string): boolean {
+  return !!db.prepare('SELECT id FROM chat_targets WHERE id = ? AND user_id = ?').get(targetId, userId);
+}
+
+function verifySessionOwnership(sessionId: string, userId: string): boolean {
+  const session = db.prepare('SELECT target_id FROM ai_sessions WHERE id = ?').get(sessionId) as any;
+  if (!session) return false;
+  return verifyTargetOwnership(session.target_id, userId);
+}
+
+app.get('/api/targets/:id/messages', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   res.json(db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at ASC').all(req.params.id));
 });
 
-app.post('/api/targets/:id/messages', (req: Request, res: Response) => {
+app.post('/api/targets/:id/messages', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   const { role, text, source, strategy, session_id } = req.body;
   if (!role || !text?.trim()) { res.status(400).json({ error: 'role 和 text 必填' }); return; }
   if (!['her', 'me', 'scene'].includes(role)) { res.status(400).json({ error: 'role 必须为 her、me 或 scene' }); return; }
-  const target = db.prepare('SELECT id FROM chat_targets WHERE id = ?').get(req.params.id);
-  if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   const id = uuid();
   const now = Date.now();
   db.prepare(`INSERT INTO chat_messages (id, target_id, role, text, source, strategy, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -182,36 +192,39 @@ app.post('/api/targets/:id/messages', (req: Request, res: Response) => {
   res.status(201).json(db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(id));
 });
 
-app.delete('/api/targets/:id/messages', (req: Request, res: Response) => {
+app.delete('/api/targets/:id/messages', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   db.prepare('DELETE FROM chat_messages WHERE target_id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
-app.put('/api/messages/:id', (req: Request, res: Response) => {
+app.put('/api/messages/:id', (req: any, res: Response) => {
   const { text } = req.body;
   if (!text?.trim()) { res.status(400).json({ error: 'text 必填' }); return; }
-  const existing = db.prepare('SELECT id FROM chat_messages WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(req.params.id) as any;
   if (!existing) { res.status(404).json({ error: '消息不存在' }); return; }
+  if (!verifyTargetOwnership(existing.target_id, req.user.userId)) { res.status(404).json({ error: '消息不存在' }); return; }
   db.prepare('UPDATE chat_messages SET text = ? WHERE id = ?').run(text.trim(), req.params.id);
   res.json(db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(req.params.id));
 });
 
-app.delete('/api/messages/:id', (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT id FROM chat_messages WHERE id = ?').get(req.params.id);
+app.delete('/api/messages/:id', (req: any, res: Response) => {
+  const existing = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(req.params.id) as any;
   if (!existing) { res.status(404).json({ error: '消息不存在' }); return; }
+  if (!verifyTargetOwnership(existing.target_id, req.user.userId)) { res.status(404).json({ error: '消息不存在' }); return; }
   db.prepare('DELETE FROM chat_messages WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
 // ===== Sessions =====
-app.get('/api/targets/:id/sessions', (req: Request, res: Response) => {
+app.get('/api/targets/:id/sessions', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   res.json(db.prepare('SELECT * FROM ai_sessions WHERE target_id = ? ORDER BY created_at DESC').all(req.params.id));
 });
 
-app.post('/api/targets/:id/sessions', (req: Request, res: Response) => {
+app.post('/api/targets/:id/sessions', (req: any, res: Response) => {
   const targetId = req.params.id;
-  const target = db.prepare('SELECT id FROM chat_targets WHERE id = ?').get(targetId);
-  if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+  if (!verifyTargetOwnership(targetId, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   const existingCount = (db.prepare('SELECT COUNT(*) as count FROM ai_sessions WHERE target_id = ?').get(targetId) as any).count;
   const id = uuid();
   const title = `#${existingCount + 1}`;
@@ -224,15 +237,14 @@ app.post('/api/targets/:id/sessions', (req: Request, res: Response) => {
   res.status(201).json(db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(id));
 });
 
-app.get('/api/sessions/:sessionId/messages', (req: Request, res: Response) => {
-  const session = db.prepare('SELECT id FROM ai_sessions WHERE id = ?').get(req.params.sessionId);
-  if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+app.get('/api/sessions/:sessionId/messages', (req: any, res: Response) => {
+  if (!verifySessionOwnership(req.params.sessionId, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
   res.json(db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(req.params.sessionId));
 });
 
-app.delete('/api/sessions/:sessionId', (req: Request, res: Response) => {
+app.delete('/api/sessions/:sessionId', (req: any, res: Response) => {
+  if (!verifySessionOwnership(req.params.sessionId, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
   const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
-  if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
   db.transaction(() => {
     db.prepare('DELETE FROM ai_messages WHERE session_id = ?').run(req.params.sessionId);
     db.prepare('DELETE FROM ai_sessions WHERE id = ?').run(req.params.sessionId);
@@ -247,13 +259,13 @@ app.delete('/api/sessions/:sessionId', (req: Request, res: Response) => {
 });
 
 // ===== AI Generate Core =====
-app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response) => {
+app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) => {
   try {
     const { herMessage, provider } = req.body;
     if (!herMessage?.trim()) { res.status(400).json({ error: '消息不能为空' }); return; }
 
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
-    if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+    if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(session.target_id) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
@@ -434,10 +446,10 @@ app.post('/api/sessions/:sessionId/generate', async (req: Request, res: Response
 });
 
 // ===== Reply Actions =====
-app.post('/api/sessions/:sessionId/select-reply', (req: Request, res: Response) => {
+app.post('/api/sessions/:sessionId/select-reply', (req: any, res: Response) => {
   const { replyId } = req.body;
   const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
-  if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+  if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
   // Get last assistant message to find the reply
   const lastAiMsg = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1')
@@ -456,11 +468,11 @@ app.post('/api/sessions/:sessionId/select-reply', (req: Request, res: Response) 
   res.json({ success: true });
 });
 
-app.post('/api/sessions/:sessionId/custom-reply', (req: Request, res: Response) => {
+app.post('/api/sessions/:sessionId/custom-reply', (req: any, res: Response) => {
   const { text } = req.body;
   if (!text?.trim()) { res.status(400).json({ error: '回复不能为空' }); return; }
   const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
-  if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+  if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
   const id = uuid();
   db.prepare(`INSERT INTO chat_messages (id, target_id, role, text, source, strategy, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -468,11 +480,11 @@ app.post('/api/sessions/:sessionId/custom-reply', (req: Request, res: Response) 
   res.json({ success: true });
 });
 
-app.post('/api/sessions/:sessionId/regenerate', async (req: Request, res: Response) => {
+app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) => {
   try {
     const { preferredStrategy, provider } = req.body;
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
-    if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+    if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
     // Append user message requesting regeneration
     const regenContent = preferredStrategy
@@ -519,10 +531,10 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: Request, res: Respon
   }
 });
 
-app.post('/api/sessions/:sessionId/feedback', (req: Request, res: Response) => {
+app.post('/api/sessions/:sessionId/feedback', (req: any, res: Response) => {
   const { replyId, rating } = req.body;
-  const session = db.prepare('SELECT id FROM ai_sessions WHERE id = ?').get(req.params.sessionId);
-  if (!session) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+  const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
+  if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
   db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(uuid(), req.params.sessionId, 'user', JSON.stringify({ type: 'feedback', replyId, rating }), Date.now());

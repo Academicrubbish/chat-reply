@@ -167,6 +167,7 @@ export async function initDb(): Promise<void> {
   dbWrapper.exec(`
     CREATE TABLE IF NOT EXISTS chat_targets (
       id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       meet_scene TEXT DEFAULT '',
       persona TEXT DEFAULT '',
@@ -175,8 +176,10 @@ export async function initDb(): Promise<void> {
       tone_level TEXT DEFAULT 'moderate',
       goal_intent TEXT DEFAULT 'pursuing',
       forbidden_topics TEXT DEFAULT '',
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
 
     CREATE TABLE IF NOT EXISTS chat_messages (
       id TEXT PRIMARY KEY,
@@ -223,6 +226,11 @@ export async function initDb(): Promise<void> {
       created_at INTEGER NOT NULL
     );
   `);
+
+  // Migrate existing databases: add user_id to chat_targets if missing
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_targets ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`);
+  } catch {}
 
   dbReady = true;
 }

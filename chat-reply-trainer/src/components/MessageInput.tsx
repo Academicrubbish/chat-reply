@@ -30,7 +30,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, disabled, placehold
   const canSend = !disabled && text.trim().length > 0;
 
   return (
-    <div style={{ background: '#f7f7f7', borderTop: '1px solid #e0e0e0', padding: 8, display: 'flex', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
+    <div data-tour-id="message-input" style={{ background: '#f7f7f7', borderTop: '1px solid #e0e0e0', padding: 8, display: 'flex', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
       <TextArea
         value={text}
         onChange={e => setText(e.target.value)}

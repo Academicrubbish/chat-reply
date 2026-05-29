@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Input, Button, message } from 'antd';
 import * as api from '../services/api';
+import { markJustRegistered } from '../utils/tourGuide';
 
 interface SetupPageProps {
   onSuccess: () => void;
@@ -23,6 +24,7 @@ const SetupPage: React.FC<SetupPageProps> = ({ onSuccess }) => {
     try {
       const { token } = await api.setupAccount(username.trim(), password);
       localStorage.setItem('token', token);
+      markJustRegistered();
       onSuccess();
     } catch (err: any) {
       setError(err.message || '创建失败');

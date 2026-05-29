@@ -21,6 +21,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset
       </Space>
       <Space>
         <Button
+          data-tour-id="ai-assist-btn"
           type="primary"
           icon={<RobotOutlined />}
           onClick={onAIAssist}

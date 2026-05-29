@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Input, Button } from 'antd';
 import * as api from '../services/api';
+import { markJustRegistered } from '../utils/tourGuide';
 
 interface SignUpPageProps {
   onSuccess: () => void;
@@ -24,6 +25,7 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onSuccess, onSwitchToLogin }) =
     try {
       const { token } = await api.register(username.trim(), password);
       localStorage.setItem('token', token);
+      markJustRegistered();
       onSuccess();
     } catch (err: any) {
       setError(err.message || '注册失败');
