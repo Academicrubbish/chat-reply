@@ -1,6 +1,7 @@
 import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption } from '../types';
 
 const BASE = '/api';
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token');
@@ -9,8 +10,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
   const res = await fetch(`${BASE}${url}`, { headers, ...options });
   if (res.status === 401) {
-    localStorage.removeItem('token');
-    window.location.reload();
+    if (!DEMO_MODE) {
+      localStorage.removeItem('token');
+      window.location.reload();
+    }
     throw new Error('认证失败，请重新登录');
   }
   if (!res.ok) {

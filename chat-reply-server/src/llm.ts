@@ -13,6 +13,16 @@ const MODEL_REGISTRY: ModelConfig[] = [
   { provider: 'mimo', label: '小米 MiMo', apiKeyEnv: 'MIMO_API_KEY', baseUrlEnv: 'MIMO_BASE_URL', modelEnv: 'MIMO_MODEL' },
 ];
 
+const DEFAULT_BASE_URLS: Record<string, string> = {
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4/',
+  mimo: 'https://api.xiaomimimo.com/v1',
+};
+
+const DEFAULT_MODELS: Record<string, string> = {
+  zhipu: 'glm-5.1',
+  mimo: 'mimo-v2.5-pro',
+};
+
 const clients: Record<string, OpenAI> = {};
 
 function getClient(provider: string = 'zhipu'): OpenAI {
@@ -23,15 +33,15 @@ function getClient(provider: string = 'zhipu'): OpenAI {
   const apiKey = process.env[config.apiKeyEnv];
   if (!apiKey) throw new Error(`${config.apiKeyEnv} 未配置，请在 .env 文件中设置`);
 
-  const baseURL = process.env[config.baseUrlEnv] || (provider === 'zhipu' ? 'https://open.bigmodel.cn/api/paas/v4/' : undefined);
+  const baseURL = process.env[config.baseUrlEnv] || DEFAULT_BASE_URLS[provider];
   clients[provider] = new OpenAI({ apiKey, ...(baseURL && { baseURL }) });
   return clients[provider];
 }
 
 function getModel(provider: string = 'zhipu'): string {
   const config = MODEL_REGISTRY.find(m => m.provider === provider);
-  if (!config) return 'glm-5.1';
-  return process.env[config.modelEnv] || 'glm-5.1';
+  if (!config) return DEFAULT_MODELS.zhipu;
+  return process.env[config.modelEnv] || DEFAULT_MODELS[provider] || 'glm-5.1';
 }
 
 export function getAvailableModels(): { provider: string; label: string; model: string }[] {

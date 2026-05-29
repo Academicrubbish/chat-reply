@@ -181,7 +181,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const activeAbortRef = useRef<AbortController | null>(null);
-  const [selectedProvider, setSelectedProvider] = useState('zhipu');
+  const [selectedProvider, setSelectedProvider] = useState('mimo');
   const [models, setModels] = useState<ModelOption[]>([]);
 
   useEffect(() => {

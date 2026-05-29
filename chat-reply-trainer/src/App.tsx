@@ -21,6 +21,8 @@ import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
 
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+
 function AppContent() {
   const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
@@ -195,13 +197,15 @@ function AppContent() {
           onCreateNew={() => dispatch({ type: 'OPEN_MODAL' })}
           onDelete={handleDeleteTarget}
         />
-        <Button
-          size="small"
-          icon={<LogoutOutlined />}
-          onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
-        >
-          退出
-        </Button>
+        {!DEMO_MODE && (
+          <Button
+            size="small"
+            icon={<LogoutOutlined />}
+            onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
+          >
+            退出
+          </Button>
+        )}
       </div>
 
       {/* Mobile Tab Bar */}
@@ -318,7 +322,35 @@ function AppContent() {
   );
 }
 
+function DemoBanner() {
+  return (
+    <div style={{
+      background: 'linear-gradient(90deg, #667eea, #764ba2)',
+      color: 'white',
+      textAlign: 'center',
+      padding: '6px 0',
+      fontSize: 13,
+      fontWeight: 500,
+      letterSpacing: 0.5,
+      flexShrink: 0,
+    }}>
+      展示模式 · 所有用户共享数据 · 如需私有部署请联系我们
+    </div>
+  );
+}
+
 function App() {
+  if (DEMO_MODE) {
+    return (
+      <ErrorBoundary boundaryName="全局">
+        <AppProvider>
+          <DemoBanner />
+          <AppContent />
+        </AppProvider>
+      </ErrorBoundary>
+    );
+  }
+
   const [authState, setAuthState] = useState<'loading' | 'setup' | 'login' | 'signup' | 'authenticated'>('loading');
 
   useEffect(() => {

@@ -14,6 +14,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'chat-reply-dev-secret-change-in-prod';
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+const DEMO_USER = { userId: 'demo-user', username: 'demo' };
 
 function signToken(payload: { userId: string; username: string }): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
@@ -31,6 +33,11 @@ function authMiddleware(req: any, res: Response, next: any) {
   } catch {
     res.status(401).json({ error: '认证失败，请重新登录' });
   }
+}
+
+function demoMiddleware(req: any, _res: Response, next: any) {
+  req.user = DEMO_USER;
+  next();
 }
 
 const app = express();
@@ -101,6 +108,7 @@ app.use('/api', (req: Request, res: Response, next) => {
   if (req.path.startsWith('/auth')) return next();
   if (req.path === '/health') return next();
   if (req.path === '/models') return next();
+  if (DEMO_MODE) return demoMiddleware(req, res, next);
   authMiddleware(req, res, next);
 });
 
@@ -543,6 +551,14 @@ app.post('/api/sessions/:sessionId/feedback', (req: any, res: Response) => {
 
 app.listen(PORT, async () => {
   await initDb();
+  if (DEMO_MODE) {
+    const existing = db.prepare('SELECT id FROM users WHERE id = ?').get('demo-user');
+    if (!existing) {
+      db.prepare('INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
+        .run('demo-user', 'demo', '', Date.now());
+    }
+    console.log('Demo mode enabled - all requests use shared demo-user');
+  }
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
