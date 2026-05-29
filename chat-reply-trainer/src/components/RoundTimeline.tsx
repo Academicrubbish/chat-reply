@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Collapse, Tag, Card, Button, Space, Input, Spin, Tooltip } from 'antd';
+import { Collapse, Tag, Card, Button, Space, Input, Spin, Tooltip, message } from 'antd';
 import {
-  LikeOutlined, DislikeOutlined,
+  LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled,
   ReloadOutlined, AimOutlined, SendOutlined,
   CheckCircleFilled, LoadingOutlined,
 } from '@ant-design/icons';
@@ -122,6 +122,65 @@ function ThoughtChainSteps({ currentStep }: { currentStep: GenerationStep }) {
   );
 }
 
+function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
+  reply: ReplyOption;
+  onSelectReply: (reply: ReplyOption) => void;
+  onFeedback: (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => void;
+}) {
+  const [feedback, setFeedback] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
+  const [messageApi, contextHolder] = message.useMessage();
+
+  const handleFeedback = (rating: 'thumbs_up' | 'thumbs_down') => {
+    if (feedback) return;
+    setFeedback(rating);
+    onFeedback(reply.id, rating);
+    messageApi.success({
+      content: rating === 'thumbs_up' ? '已点赞，AI 会多推荐这类风格' : '已反馈，AI 会减少这类风格',
+      duration: 2,
+    });
+  };
+
+  return (
+    <>
+      {contextHolder}
+      <div
+        onClick={() => onSelectReply(reply)}
+        style={{
+          padding: '8px 10px',
+          border: '1px solid #e8e8e8',
+          borderRadius: 8,
+          cursor: 'pointer',
+          transition: 'border-color 0.2s',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = '#3b5998')}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = '#e8e8e8')}
+      >
+        <Tag color={strategyTagColor[reply.strategy] || 'default'} style={{ marginBottom: 4 }}>
+          {reply.strategy}
+        </Tag>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', lineHeight: 1.5 }}>{reply.text}</div>
+        <div style={{ fontSize: 11, color: '#999', lineHeight: 1.4 }}>{reply.reason}</div>
+        <Space size={4} style={{ marginTop: 4 }}>
+          <Tooltip title={feedback ? '已反馈' : '点赞：AI 会多推荐这类风格'}>
+            <Button type="text" size="small"
+              icon={feedback === 'thumbs_up' ? <LikeFilled /> : <LikeOutlined />}
+              style={feedback === 'thumbs_up' ? { color: '#1890ff' } : undefined}
+              disabled={feedback === 'thumbs_down'}
+              onClick={e => { e.stopPropagation(); handleFeedback('thumbs_up'); }} />
+          </Tooltip>
+          <Tooltip title={feedback ? '已反馈' : '踩：AI 会减少这类风格'}>
+            <Button type="text" size="small"
+              icon={feedback === 'thumbs_down' ? <DislikeFilled /> : <DislikeOutlined />}
+              style={feedback === 'thumbs_down' ? { color: '#ff4d4f' } : undefined}
+              disabled={feedback === 'thumbs_up'}
+              onClick={e => { e.stopPropagation(); handleFeedback('thumbs_down'); }} />
+          </Tooltip>
+        </Space>
+      </div>
+    </>
+  );
+}
+
 function CurrentRoundCard({
   analysis,
   replies,
@@ -237,38 +296,13 @@ function CurrentRoundCard({
       {/* Reply options */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(replies ?? []).map(reply => (
-          <div
-            key={reply.id}
-            onClick={() => onSelectReply(reply)}
-            style={{
-              padding: '8px 10px',
-              border: '1px solid #e8e8e8',
-              borderRadius: 8,
-              cursor: 'pointer',
-              transition: 'border-color 0.2s',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = '#3b5998')}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = '#e8e8e8')}
-          >
-            <Tag color={strategyTagColor[reply.strategy] || 'default'} style={{ marginBottom: 4 }}>
-              {reply.strategy}
-            </Tag>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', lineHeight: 1.5 }}>{reply.text}</div>
-            <div style={{ fontSize: 11, color: '#999', lineHeight: 1.4 }}>{reply.reason}</div>
-            <Space size={4} style={{ marginTop: 4 }}>
-              <Button type="text" size="small" icon={<LikeOutlined />}
-                onClick={e => { e.stopPropagation(); onFeedback(reply.id, 'thumbs_up'); }} />
-              <Button type="text" size="small" icon={<DislikeOutlined />}
-                onClick={e => { e.stopPropagation(); onFeedback(reply.id, 'thumbs_down'); }} />
-            </Space>
-          </div>
+          <FeedbackReplyCard key={reply.id} reply={reply} onSelectReply={onSelectReply} onFeedback={onFeedback} />
         ))}
       </div>
 
       {/* Actions */}
       <Space style={{ marginTop: 10 }} size={8}>
         <Button size="small" icon={<ReloadOutlined />} onClick={onRegenerate}>重新生成</Button>
-        <Button size="small" icon={<AimOutlined />}>指定策略</Button>
       </Space>
 
       {/* Custom reply */}
