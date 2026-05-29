@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）
+title: 聊天模拟器（Chat Simulator）
 parent:
 status: draft
 created: 2026-05-27
@@ -7,7 +7,7 @@ updated: 2026-05-27
 author: 用户
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）Spec
+# 聊天模拟器（Chat Simulator）Spec
 
 ## 背景
 
@@ -65,7 +65,7 @@ author: 用户
 
 ### UI 整体布局规格
 - 整体背景：浅灰白 #f7f8fa
-- 顶部标题栏：白色背景，左侧 Logo（渐变紫蓝圆角方块）+ 标题"聊天回复训练器" + 副标题
+- 顶部标题栏：白色背景，左侧 Logo（渐变紫蓝圆角方块）+ 标题"聊天模拟器" + 副标题
 - 左侧面板：40% 宽度（min-width: 400px, max-width: 520px），白色背景，右侧 1px #e8e8e8 边框
 - 右侧面板：flex: 1（约 60%），灰色背景 #ededed
 - 主按钮：深蓝 #3b5998，圆角 6px
@@ -122,7 +122,7 @@ author: 用户
 - 生成中重复点击发送，不触发重复请求
 
 ## 关联信息
-- 需求来源：产品需求文档 `聊天回复训练器-需求文档.md`
+- 需求来源：产品需求文档 `聊天模拟器-需求文档.md`
 - UI 设计稿：`ui-scheme.html`（方案一：需求文档标准版，左右分栏 + 微信风格）
 - 依赖：
   - React 18 + TypeScript

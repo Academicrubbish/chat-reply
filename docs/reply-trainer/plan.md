@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）一期 Plan
+title: 聊天模拟器（Chat Simulator）一期 Plan
 design: ./design.md
 status: draft
 created: 2026-05-28
@@ -7,7 +7,7 @@ updated: 2026-05-28
 author: yuanchuang
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）一期 Plan
+# 聊天模拟器（Chat Simulator）一期 Plan
 
 ## 需求简述
 

@@ -1,5 +1,5 @@
 ---
-title: Chat Reply Trainer V2 Code Report
+title: Chat Simulator V2 Code Report
 tasks: ./tasks.md
 status: completed
 started: 2026-05-29 14:00
@@ -7,7 +7,7 @@ finished: 2026-05-29 15:30
 author: yuanchuang
 ---
 
-# Chat Reply Trainer V2 Code Report
+# Chat Simulator V2 Code Report
 
 ## 执行概览
 

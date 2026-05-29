@@ -40,7 +40,7 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onSuccess, onSwitchToLogin }) =
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{ width: 48, height: 48, margin: '0 auto 12px', background: 'linear-gradient(135deg, #667eea, #764ba2)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: 20 }}>AI</div>
           <h2 style={{ margin: 0, fontSize: 18 }}>注册账号</h2>
-          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Chat Reply Trainer</div>
+          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Chat Simulator</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Input placeholder="用户名" value={username} onChange={e => setUsername(e.target.value)} size="large" />

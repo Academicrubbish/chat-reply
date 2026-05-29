@@ -1,5 +1,5 @@
 ---
-title: Chat Reply Trainer V2 Design
+title: Chat Simulator V2 Design
 spec: ./spec.md
 status: draft
 created: 2026-05-29
@@ -7,7 +7,7 @@ updated: 2026-05-29
 author: yuanchuang
 ---
 
-# Chat Reply Trainer V2 Design
+# Chat Simulator V2 Design
 
 ## 需求简述
 

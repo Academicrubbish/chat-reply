@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）一期 Tasks
+title: 聊天模拟器（Chat Simulator）一期 Tasks
 plan: ./plan.md
 status: draft
 created: 2026-05-28
@@ -7,7 +7,7 @@ updated: 2026-05-28
 author: yuanchuang
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）一期 Tasks
+# 聊天模拟器（Chat Simulator）一期 Tasks
 
 > 完成标准：每个 Task 的实现内容完成 + 测试用例全部通过。
 
@@ -29,9 +29,9 @@ author: yuanchuang
   - `npm create vite@latest chat-reply-trainer -- --template react-ts`
   - vite.config.ts 配置 proxy：`'/api': { target: 'http://localhost:3001', changeOrigin: true }`
   - 创建目录：`src/components/`、`src/hooks/`、`src/services/`
-  - App.tsx 占位：`<div>Chat Reply Trainer</div>`
+  - App.tsx 占位：`<div>Chat Simulator</div>`
 - **测试用例**：
-  - 用例 1：`npm run dev` → localhost:5173 显示 "Chat Reply Trainer"
+  - 用例 1：`npm run dev` → localhost:5173 显示 "Chat Simulator"
   - 用例 2：curl localhost:5173/api/health → 代理到后端（需后端启动）
 - **依赖**：无
 

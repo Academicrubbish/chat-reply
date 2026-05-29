@@ -161,8 +161,8 @@ function AppContent() {
         <div className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 shrink-0">
           <div className="w-9 h-9 bg-linear-to-br from-[#667eea] to-[#764ba2] rounded-lg flex items-center justify-center text-white font-bold text-base">AI</div>
           <div className="flex flex-col">
-            <h1>聊天回复训练器</h1>
-            <div className="text-xs text-[#888]">Chat Reply Trainer · AI Agent 辅助沟通</div>
+            <h1>聊天模拟器</h1>
+            <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
           </div>
         </div>
         <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} />
@@ -184,8 +184,8 @@ function AppContent() {
       <div className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 shrink-0">
         <div className="w-9 h-9 bg-linear-to-br from-[#667eea] to-[#764ba2] rounded-lg flex items-center justify-center text-white font-bold text-base">AI</div>
         <div className="flex flex-col">
-          <h1>聊天回复训练器</h1>
-          <div className="text-xs text-[#888]">Chat Reply Trainer · AI Agent 辅助沟通</div>
+          <h1>聊天模拟器</h1>
+          <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
         </div>
         <div className="flex-1" />
         <TargetSelector

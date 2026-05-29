@@ -1,12 +1,12 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）一期
+title: 聊天模拟器（Chat Simulator）一期
 status: draft
 created: 2026-05-28
 updated: 2026-05-28
 author: yuanchuang
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）一期 Spec
+# 聊天模拟器（Chat Simulator）一期 Spec
 
 ## 背景
 
@@ -118,7 +118,7 @@ author: yuanchuang
 ### F9 - UI 整体布局
 
 - 整体背景：浅灰白 #f7f8fa
-- 顶部标题栏（高度 56px）：白色背景，Logo（渐变紫蓝圆角方块 + "AI"）+ 标题「聊天回复训练器」+ 副标题 + 聊天对象选择器
+- 顶部标题栏（高度 56px）：白色背景，Logo（渐变紫蓝圆角方块 + "AI"）+ 标题「聊天模拟器」+ 副标题 + 聊天对象选择器
 - 左侧面板（70%，min-width 600px）：白色背景，包含人设卡片 → 辅导窗口管理条 → 情境状态栏 → 对话策略计划 → Tab（信号分析/策略建议）→ AI 工作步骤进度
 - 右侧面板（30%，min-width 320px, max-width 420px）：灰色背景 #ededed，微信风格聊天模拟器
   - Header：头像 + 名字 + 在线状态 + 「AI 辅助」按钮 + 「重新开始」按钮
@@ -216,7 +216,7 @@ author: yuanchuang
 
 ## 关联信息
 
-- 需求来源：`docs/需求整理.md`（聊天回复训练器一期需求）
+- 需求来源：`docs/需求整理.md`（聊天模拟器一期需求）
 - UI 设计稿：`docs/ui-scheme.html`（方案 v2.2，信号分析全屏 + 回复弹窗浮层 + Harness 机制）
 - 技术栈：
   - 前端：React 18 + TypeScript + Vite + 纯 CSS

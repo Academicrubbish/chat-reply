@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）Code Report
+title: 聊天模拟器（Chat Simulator）Code Report
 tasks: tasks.md
 status: completed
 started: 2026-05-27
@@ -7,7 +7,7 @@ finished: 2026-05-27
 author: 用户
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）Code Report
+# 聊天模拟器（Chat Simulator）Code Report
 
 ## 执行概览
 
@@ -159,7 +159,7 @@ author: 用户
 cd chat-reply-trainer
 git init
 git add -A
-git commit -m "feat: 聊天回复训练器初始版本
+git commit -m "feat: 聊天模拟器初始版本
 
 - 左右分栏布局：左侧策略控制台 + 右侧微信风格聊天模拟器
 - 后端 Express API：POST /api/generate-replies，调用 Claude API

@@ -1,5 +1,5 @@
 ---
-title: Chat Reply Trainer V2 Plan
+title: Chat Simulator V2 Plan
 design: ./design.md
 status: draft
 created: 2026-05-29
@@ -7,7 +7,7 @@ updated: 2026-05-29
 author: yuanchuang
 ---
 
-# Chat Reply Trainer V2 Plan
+# Chat Simulator V2 Plan
 
 ## 需求简述
 

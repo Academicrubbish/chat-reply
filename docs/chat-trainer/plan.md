@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）Plan
+title: 聊天模拟器（Chat Simulator）Plan
 design: design.md
 status: draft
 created: 2026-05-27
@@ -7,7 +7,7 @@ updated: 2026-05-27
 author: 用户
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）Plan
+# 聊天模拟器（Chat Simulator）Plan
 
 ## 需求简述
 
@@ -142,7 +142,7 @@ author: 用户
 
 **验证点**：
 - 页面与 ui-scheme.html 视觉一致
-- 顶部标题栏显示 Logo + "聊天回复训练器"
+- 顶部标题栏显示 Logo + "聊天模拟器"
 - 左侧面板初始显示"等待输入"状态
 - 右侧面板显示空聊天区 + 输入框
 

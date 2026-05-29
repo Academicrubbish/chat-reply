@@ -1,5 +1,5 @@
 ---
-title: Chat Reply Trainer V2 Tasks
+title: Chat Simulator V2 Tasks
 plan: ./plan.md
 status: draft
 created: 2026-05-29
@@ -7,7 +7,7 @@ updated: 2026-05-29
 author: yuanchuang
 ---
 
-# Chat Reply Trainer V2 Tasks
+# Chat Simulator V2 Tasks
 
 > 完成标准：每个 Task 的实现内容完成 + 测试用例全部通过。
 
@@ -256,7 +256,7 @@ author: yuanchuang
   - `chat-reply-trainer/src/App.tsx`（修改）
 - **实现内容**：
   - 创建 OnboardingPage.tsx：
-    - 居中布局，标题 "聊天回复训练器"
+    - 居中布局，标题 "聊天模拟器"
     - 副标题 "用 AI 帮你分析对方消息并生成多种风格的回复建议"
     - 3 步骤卡片（带图标）：① 创建聊天对象 → ② 输入消息 → ③ AI 辅助
     - "开始使用 — 创建第一个对象" 按钮 → 触发创建聊天对象弹窗

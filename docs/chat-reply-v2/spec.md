@@ -1,12 +1,12 @@
 ---
-title: Chat Reply Trainer V2
+title: Chat Simulator V2
 status: draft
 created: 2026-05-28
 updated: 2026-05-28
 author: yuanchuang
 ---
 
-# Chat Reply Trainer V2 Spec
+# Chat Simulator V2 Spec
 
 ## 背景
 

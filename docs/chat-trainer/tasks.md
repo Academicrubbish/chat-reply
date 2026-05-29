@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）Tasks
+title: 聊天模拟器（Chat Simulator）Tasks
 plan: plan.md
 status: draft
 created: 2026-05-27
@@ -7,7 +7,7 @@ updated: 2026-05-27
 author: 用户
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）Tasks
+# 聊天模拟器（Chat Simulator）Tasks
 
 > 完成标准：每个 Task 的实现内容完成 + 测试用例全部通过。
 
@@ -246,7 +246,7 @@ author: 用户
   - `src/App.tsx`（新增）
 - **实现内容**：
   - 引入 useChat hook
-  - 顶部标题栏：Logo（渐变紫蓝方块 + "AI"）+ "聊天回复训练器" + 副标题
+  - 顶部标题栏：Logo（渐变紫蓝方块 + "AI"）+ "聊天模拟器" + 副标题
   - 左侧面板（.left-panel）：
     - AnalysisBar（传入 state.analysis, state.tip）
     - ReplyOptions（传入 state.replies, selectReply）

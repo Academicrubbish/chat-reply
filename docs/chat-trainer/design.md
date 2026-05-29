@@ -1,5 +1,5 @@
 ---
-title: 聊天回复训练器（Chat Reply Trainer）Design
+title: 聊天模拟器（Chat Simulator）Design
 spec: spec.md
 status: draft
 created: 2026-05-27
@@ -7,7 +7,7 @@ updated: 2026-05-27
 author: 用户
 ---
 
-# 聊天回复训练器（Chat Reply Trainer）Design
+# 聊天模拟器（Chat Simulator）Design
 
 ## 需求简述
 
