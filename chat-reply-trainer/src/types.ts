@@ -39,6 +39,19 @@ export interface AIMessage {
   session_id: string;
   role: 'user' | 'assistant';
   content: string;
+  round_id: string | null;
+  version: number;
+  created_at: number;
+}
+
+export interface ReplySelection {
+  id: string;
+  session_id: string;
+  ai_message_id: string;
+  reply_id: number;
+  reply_text: string;
+  strategy: string | null;
+  chat_message_id: string;
   created_at: number;
 }
 
@@ -61,6 +74,13 @@ export interface FavorabilityRecord {
   round: number;
 }
 
+export interface ReplyVersion {
+  analysis: AnalysisData;
+  replies: ReplyOption[];
+  aiMessageId?: string;
+  roundId?: string;
+}
+
 export interface ReplyOption {
   id: number;
   strategy: string;
@@ -80,6 +100,8 @@ export interface GenerateResponse {
     percentage: number;
   };
   replies: ReplyOption[];
+  roundId?: string;
+  version?: number;
 }
 
 export type AppPhase = 'idle' | 'her_sent' | 'generating' | 'waiting_select';
@@ -108,6 +130,9 @@ export interface AppState {
   modalOpen: boolean;
   editingTarget: ChatTarget | null;
   favorabilityHistory: FavorabilityRecord[];
+  replyVersions: ReplyVersion[];
+  activeVersionIndex: number;
+  replySelections: ReplySelection[];
 }
 
 export type AppAction =
@@ -132,5 +157,9 @@ export type AppAction =
   | { type: 'STREAM_ANALYSIS'; analysis: AnalysisData }
   | { type: 'STREAM_DELTA'; text: string }
   | { type: 'STREAM_REPLIES'; replies: ReplyOption[] }
-  | { type: 'STREAM_DONE'; contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number } }
-  | { type: 'SET_GENERATION_STEP'; step: GenerationStep };
+  | { type: 'STREAM_DONE'; contextUsage: { estimatedTokens: number; maxTokens: number; percentage: number }; roundId?: string }
+  | { type: 'SET_GENERATION_STEP'; step: GenerationStep }
+  | { type: 'TRIGGER_REGENERATE' }
+  | { type: 'SWITCH_VERSION'; index: number }
+  | { type: 'ADVANCE_REGEN_STEP' }
+  | { type: 'SET_REPLY_SELECTIONS'; selections: ReplySelection[] };

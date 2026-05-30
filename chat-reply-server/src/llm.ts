@@ -50,7 +50,7 @@ export async function chatCompletion(messages: Array<{ role: string; content: st
   return response.choices[0].message.content || '';
 }
 
-export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxRetries = 1): AsyncGenerator<string> {
+export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxRetries = 1, maxTokens = 4096): AsyncGenerator<string> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -58,7 +58,7 @@ export async function* chatCompletionStream(messages: Array<{ role: string; cont
         model: getModel(provider),
         messages: messages as any,
         temperature: 0.8,
-        max_tokens: 4096,
+        max_tokens: maxTokens,
         stream: true,
       });
       for await (const chunk of stream) {

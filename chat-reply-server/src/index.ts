@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
-import { buildSystemPrompt } from './prompt';
+import { buildSystemPrompt, buildQuickPrompt } from './prompt';
 import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -242,6 +242,11 @@ app.get('/api/sessions/:sessionId/messages', (req: any, res: Response) => {
   res.json(db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(req.params.sessionId));
 });
 
+app.get('/api/sessions/:sessionId/selections', (req: any, res: Response) => {
+  if (!verifySessionOwnership(req.params.sessionId, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+  res.json(db.prepare('SELECT * FROM reply_selections WHERE session_id = ? ORDER BY created_at ASC').all(req.params.sessionId));
+});
+
 app.delete('/api/sessions/:sessionId', (req: any, res: Response) => {
   if (!verifySessionOwnership(req.params.sessionId, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
   const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
@@ -258,11 +263,54 @@ app.delete('/api/sessions/:sessionId', (req: any, res: Response) => {
   res.json({ success: true });
 });
 
+// ===== Shared JSON Parser =====
+
+const SAFE_FALLBACK = {
+  analysis: {
+    stage: '分析中', signal: '模糊', strategy: '安全回复',
+    signalText: 'AI 返回格式异常，已降级处理', emotions: [],
+    tip: '建议重新生成', favorability: 50, favorabilityReason: '',
+  },
+  plan: { goal: '维持当前关系', nextStep: '继续对话' },
+  replies: [{ id: 1, strategy: '安全回复', text: '嗯嗯，确实', reason: '降级兜底回复' }],
+};
+
+function parseJsonSafely(text: string): any | null {
+  try { return JSON.parse(text); } catch {}
+  const stripped = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+  try { return JSON.parse(stripped); } catch {}
+  const noChineseQuotes = stripped.replace(/[""]/g, '"');
+  try { return JSON.parse(noChineseQuotes); } catch {}
+  const firstBrace = noChineseQuotes.indexOf('{');
+  const lastBrace = noChineseQuotes.lastIndexOf('}');
+  if (firstBrace === -1) return null;
+  let jsonStr = lastBrace > firstBrace
+    ? noChineseQuotes.slice(firstBrace, lastBrace + 1)
+    : noChineseQuotes.slice(firstBrace);
+  jsonStr = jsonStr.replace(/[\x00-\x1f]/g, '').replace(/,\s*([}\]])/g, '$1');
+  try { return JSON.parse(jsonStr); } catch {}
+  let salvage = jsonStr;
+  const quoteCount = (salvage.match(/"/g) || []).length;
+  if (quoteCount % 2 !== 0) salvage += '"';
+  const openBrackets = (salvage.match(/\[/g) || []).length - (salvage.match(/\]/g) || []).length;
+  const openBraces = (salvage.match(/\{/g) || []).length - (salvage.match(/\}/g) || []).length;
+  for (let i = 0; i < openBrackets; i++) salvage += ']';
+  for (let i = 0; i < openBraces; i++) salvage += '}';
+  salvage = salvage.replace(/,\s*([}\]])/g, '$1');
+  try {
+    const result = JSON.parse(salvage);
+    console.log('[LLM] Salvaged truncated JSON successfully');
+    return result;
+  } catch {}
+  return null;
+}
+
 // ===== AI Generate Core =====
 app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) => {
   try {
-    const { herMessage, provider } = req.body;
+    const { herMessage, provider, mode } = req.body;
     if (!herMessage?.trim()) { res.status(400).json({ error: '消息不能为空' }); return; }
+    const isQuick = mode === 'quick';
 
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
@@ -285,20 +333,17 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       .join('；');
 
     // Build system prompt
-    const systemPrompt = buildSystemPrompt({
-      target,
-      recentMessages,
-      planGoal: session.plan_goal,
-      planNextStep: session.plan_next_step,
-      feedbackPreferences: feedbackPrefs,
-    });
+    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: feedbackPrefs };
+    const systemPrompt = isQuick ? buildQuickPrompt(promptParams) : buildSystemPrompt(promptParams);
 
     // Build conversation messages for AI
     const conversationMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: systemPrompt },
     ];
-    for (const aiMsg of aiMessages) {
-      conversationMessages.push({ role: aiMsg.role, content: aiMsg.content });
+    if (!isQuick) {
+      for (const aiMsg of aiMessages) {
+        conversationMessages.push({ role: aiMsg.role, content: aiMsg.content });
+      }
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${herMessage}` });
 
@@ -319,10 +364,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    // Step 1: Analyze
-    send('step', { step: 'analyze' });
+    // Steps: quick mode skips analyze/parsing, goes straight to generating
+    if (!isQuick) send('step', { step: 'analyze' });
 
-    // Step 2: Call LLM with streaming + heartbeat
     let raw = '';
     send('step', { step: 'generating' });
 
@@ -332,7 +376,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     }, 2000);
 
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu')) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 2048 : 4096)) {
         raw += delta;
         send('delta', { text: delta });
       }
@@ -341,63 +385,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     }
 
     // Step 3: Parse response with multi-round fallback
-    send('step', { step: 'parsing' });
+    if (!isQuick) send('step', { step: 'parsing' });
 
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
-
-    const SAFE_FALLBACK = {
-      analysis: {
-        stage: '分析中', signal: '模糊', strategy: '安全回复',
-        signalText: 'AI 返回格式异常，已降级处理', emotions: [],
-        tip: '建议重新生成', favorability: 50, favorabilityReason: '',
-      },
-      plan: { goal: '维持当前关系', nextStep: '继续对话' },
-      replies: [{ id: 1, strategy: '安全回复', text: '嗯嗯，确实', reason: '降级兜底回复' }],
-    };
-
-    function parseJsonSafely(text: string): any | null {
-      // Attempt 1: Direct parse
-      try { return JSON.parse(text); } catch {}
-
-      // Attempt 2: Strip markdown code fences
-      const stripped = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
-      try { return JSON.parse(stripped); } catch {}
-
-      // Attempt 3: Replace Chinese quotes
-      const noChineseQuotes = stripped.replace(/[“”]/g, '”');
-      try { return JSON.parse(noChineseQuotes); } catch {}
-
-      // Attempt 4: Extract JSON block and try to salvage
-      const firstBrace = noChineseQuotes.indexOf('{');
-      const lastBrace = noChineseQuotes.lastIndexOf('}');
-      if (firstBrace === -1) return null;
-
-      let jsonStr = lastBrace > firstBrace
-        ? noChineseQuotes.slice(firstBrace, lastBrace + 1)
-        : noChineseQuotes.slice(firstBrace);
-
-      // Clean control chars and trailing commas
-      jsonStr = jsonStr.replace(/[\x00-\x1f]/g, '').replace(/,\s*([}\]])/g, '$1');
-
-      try { return JSON.parse(jsonStr); } catch {}
-
-      // Attempt 5: Salvage truncated JSON — balance brackets and quotes
-      let salvage = jsonStr;
-      const quoteCount = (salvage.match(/”/g) || []).length;
-      if (quoteCount % 2 !== 0) salvage += '”';
-      const openBrackets = (salvage.match(/\[/g) || []).length - (salvage.match(/\]/g) || []).length;
-      const openBraces = (salvage.match(/\{/g) || []).length - (salvage.match(/\}/g) || []).length;
-      for (let i = 0; i < openBrackets; i++) salvage += ']';
-      for (let i = 0; i < openBraces; i++) salvage += '}';
-      salvage = salvage.replace(/,\s*([}\]])/g, '$1');
-      try {
-        const result = JSON.parse(salvage);
-        console.log('[LLM] Salvaged truncated JSON successfully');
-        return result;
-      } catch {}
-
-      return null;
-    }
 
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
@@ -408,9 +398,20 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
     console.log('[LLM Parsed] keys:', Object.keys(parsed), 'replies count:', parsed.replies?.length ?? 0);
 
-    // Send structured events (always send replies even if empty, so frontend knows generation is done)
-    if (parsed.analysis) send('analysis', parsed.analysis);
-    if (parsed.plan) send('plan', parsed.plan);
+    // Safety net: ensure analysis exists (prompt should provide it, but defend against AI non-compliance)
+    if (!parsed.analysis) {
+      parsed.analysis = {
+        stage: '分析中', signal: '模糊', strategy: '安全回复',
+        signalText: 'AI 未返回分析，已降级处理', emotions: [],
+        tip: '建议重新生成', favorability: 50, favorabilityReason: '',
+      };
+    }
+
+    // Send structured events
+    if (!isQuick) {
+      if (parsed.analysis) send('analysis', parsed.analysis);
+      if (parsed.plan) send('plan', parsed.plan);
+    }
 
     const maxTokens = 8000;
     const contextUsage = { estimatedTokens, maxTokens, percentage: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100) };
@@ -418,13 +419,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     send('replies', parsed.replies || []);
 
     // Save to DB
+    const roundId = uuid();
     const userAiMsgId = uuid();
     const assistantAiMsgId = uuid();
     db.transaction(() => {
-      db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(userAiMsgId, session.id, 'user', JSON.stringify({ herMessage }), now);
-      db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(assistantAiMsgId, session.id, 'assistant', JSON.stringify(parsed), now + 1);
+      db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(userAiMsgId, session.id, 'user', JSON.stringify({ herMessage }), roundId, 1, now);
+      db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(assistantAiMsgId, session.id, 'assistant', JSON.stringify(parsed), roundId, 1, now + 1);
       const newRoundCount = session.round_count + 1;
       const newPlanGoal = parsed.plan?.goal || session.plan_goal;
       const newPlanNextStep = parsed.plan?.nextStep || session.plan_next_step;
@@ -432,7 +434,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
         .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, session.id);
     })();
 
-    send('done', { contextUsage });
+    send('done', { contextUsage, roundId, version: 1 });
     res.end();
   } catch (err: any) {
     console.error('Generate error:', err);
@@ -447,25 +449,36 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
 // ===== Reply Actions =====
 app.post('/api/sessions/:sessionId/select-reply', (req: any, res: Response) => {
-  const { replyId } = req.body;
+  const { replyId, aiMessageId } = req.body;
   const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
   if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
-  // Get last assistant message to find the reply
-  const lastAiMsg = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1')
-    .get(req.params.sessionId, 'assistant') as any;
-  if (!lastAiMsg) { res.status(400).json({ error: '没有可用的回复' }); return; }
+  // Get the specific assistant message (version-aware) or fall back to last one
+  let aiMsg: any;
+  if (aiMessageId) {
+    aiMsg = db.prepare('SELECT * FROM ai_messages WHERE id = ? AND session_id = ? AND role = ?')
+      .get(aiMessageId, req.params.sessionId, 'assistant');
+  } else {
+    aiMsg = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1')
+      .get(req.params.sessionId, 'assistant');
+  }
+  if (!aiMsg) { res.status(400).json({ error: '没有可用的回复' }); return; }
 
   let parsed: any;
-  try { parsed = JSON.parse(lastAiMsg.content); } catch { res.status(500).json({ error: '解析失败' }); return; }
+  try { parsed = JSON.parse(aiMsg.content); } catch { res.status(500).json({ error: '解析失败' }); return; }
 
   const reply = (parsed.replies || []).find((r: any) => r.id === replyId);
   if (!reply) { res.status(400).json({ error: '回复不存在' }); return; }
 
-  const id = uuid();
+  const chatMsgId = uuid();
   db.prepare(`INSERT INTO chat_messages (id, target_id, role, text, source, strategy, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, session.target_id, 'me', reply.text, 'AI建议', reply.strategy, session.id, Date.now());
-  res.json({ success: true });
+    .run(chatMsgId, session.target_id, 'me', reply.text, 'AI建议', reply.strategy, session.id, Date.now());
+
+  // Track selection explicitly
+  db.prepare(`INSERT INTO reply_selections (id, session_id, ai_message_id, reply_id, reply_text, strategy, chat_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(uuid(), req.params.sessionId, aiMsg.id, replyId, reply.text, reply.strategy, chatMsgId, Date.now());
+
+  res.json({ success: true, messageId: chatMsgId });
 });
 
 app.post('/api/sessions/:sessionId/custom-reply', (req: any, res: Response) => {
@@ -477,21 +490,35 @@ app.post('/api/sessions/:sessionId/custom-reply', (req: any, res: Response) => {
   const id = uuid();
   db.prepare(`INSERT INTO chat_messages (id, target_id, role, text, source, strategy, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, session.target_id, 'me', text.trim(), '自定义回复', null, session.id, Date.now());
-  res.json({ success: true });
+  res.json({ success: true, messageId: id });
 });
 
 app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) => {
   try {
-    const { preferredStrategy, provider } = req.body;
+    const { preferredStrategy, provider, mode, roundId: requestedRoundId } = req.body;
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
+    const isQuick = mode === 'quick';
+
+    // Determine round_id and next version
+    let roundId: string;
+    let nextVersion: number;
+    if (requestedRoundId) {
+      roundId = requestedRoundId;
+      const maxVer = db.prepare('SELECT MAX(version) as max_ver FROM ai_messages WHERE session_id = ? AND round_id = ?')
+        .get(session.id, roundId) as any;
+      nextVersion = (maxVer?.max_ver || 0) + 1;
+    } else {
+      const lastAssistant = db.prepare('SELECT round_id, version FROM ai_messages WHERE session_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1')
+        .get(session.id, 'assistant') as any;
+      roundId = lastAssistant?.round_id || uuid();
+      nextVersion = (lastAssistant?.version || 0) + 1;
+    }
+
     // Append user message requesting regeneration
-    const regenContent = preferredStrategy
-      ? `用户不满意上次的结果，请重新生成回复。用户偏好策略：${preferredStrategy}`
-      : '用户不满意上次的结果，请重新生成回复。';
-    db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(uuid(), session.id, 'user', JSON.stringify({ type: 'regenerate', preferredStrategy }), Date.now());
+    db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(uuid(), session.id, 'user', JSON.stringify({ type: 'regenerate', preferredStrategy }), roundId, nextVersion, Date.now());
 
     // Re-run generate logic (simplified: redirect to generate with last her message)
     const lastHerMsg = db.prepare(`SELECT * FROM chat_messages WHERE target_id = ? AND role = 'her' ORDER BY created_at DESC LIMIT 1`)
@@ -503,17 +530,39 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(session.target_id).reverse();
     const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(session.id);
 
-    const systemPrompt = buildSystemPrompt({ target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' });
+    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' };
+    const systemPrompt = isQuick ? buildQuickPrompt(promptParams) : buildSystemPrompt(promptParams);
     const conversationMessages: Array<{ role: string; content: string }> = [{ role: 'system', content: systemPrompt }];
-    for (const aiMsg of aiMessages) { conversationMessages.push({ role: aiMsg.role, content: aiMsg.content }); }
+    if (!isQuick) {
+      for (const aiMsg of aiMessages) { conversationMessages.push({ role: aiMsg.role, content: aiMsg.content }); }
+    }
+    conversationMessages.push({ role: 'user', content: `对方的最新消息是：${lastHerMsg.text}` });
 
-    const raw = await chatCompletion(conversationMessages, provider || 'zhipu');
-    let parsed: any;
-    try { const m = raw.match(/\{[\s\S]*\}/); if (!m) throw new Error('no json'); parsed = JSON.parse(m[0]); }
-    catch (parseErr: any) { res.status(500).json({ error: `AI 响应解析失败` }); return; }
+    let raw = '';
+    if (isQuick) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 2048)) {
+        raw += delta;
+      }
+    } else {
+      raw = await chatCompletion(conversationMessages, provider || 'zhipu');
+    }
+    let parsed = parseJsonSafely(raw);
+    if (!parsed) {
+      console.error('[Regen Parse Error] All fallback attempts failed. Raw:', raw.slice(0, 500));
+      parsed = SAFE_FALLBACK;
+    }
 
-    db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(uuid(), session.id, 'assistant', JSON.stringify(parsed), Date.now());
+    // Safety net: ensure analysis exists
+    if (!parsed.analysis) {
+      parsed.analysis = {
+        stage: '分析中', signal: '模糊', strategy: '安全回复',
+        signalText: 'AI 未返回分析，已降级处理', emotions: [],
+        tip: '建议重新生成', favorability: 50, favorabilityReason: '',
+      };
+    }
+
+    db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(uuid(), session.id, 'assistant', JSON.stringify(parsed), roundId, nextVersion, Date.now());
 
     const totalText = conversationMessages.map(m => m.content).join('');
     const estimatedTokens = Math.ceil(totalText.length * 2);
@@ -525,6 +574,8 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       plan: parsed.plan || { goal: session.plan_goal, nextStep: session.plan_next_step },
       contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) },
       replies: parsed.replies || [],
+      roundId,
+      version: nextVersion,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'AI 服务异常' });

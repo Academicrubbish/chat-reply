@@ -22,7 +22,7 @@ import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, quickMode, setQuickMode } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -114,12 +114,26 @@ function AppContent() {
   };
 
   const handleRegenerate = async () => {
-    if (!state.currentSessionId) return;
-    dispatch({ type: 'TRIGGER_AI' });
+    if (!state.currentSessionId || state.phase === 'generating') return;
+    dispatch({ type: 'TRIGGER_REGENERATE' });
+
+    // Simulate step chain progression (regenerate is non-streaming)
+    const t1 = setTimeout(() => dispatch({ type: 'ADVANCE_REGEN_STEP' }), 1500);
+    const t2 = setTimeout(() => dispatch({ type: 'ADVANCE_REGEN_STEP' }), 3500);
+
+    // Get current round's roundId from replyVersions
+    const currentRoundId = state.replyVersions[state.activeVersionIndex]?.roundId;
+
     try {
-      const data = await api.regenerate(state.currentSessionId);
+      const data = await api.regenerate(state.currentSessionId, {
+        mode: quickMode ? 'quick' : 'full',
+        provider: selectedProvider,
+        roundId: currentRoundId,
+      });
+      clearTimeout(t1); clearTimeout(t2);
       dispatch({ type: 'GENERATE_SUCCESS', data });
     } catch (err: any) {
+      clearTimeout(t1); clearTimeout(t2);
       dispatch({ type: 'GENERATE_FAILURE', error: err.message });
     }
   };
@@ -253,6 +267,7 @@ function AppContent() {
           )}>
           <RoundTimeline
             aiMessages={state.aiMessages}
+            replySelections={state.replySelections}
             phase={state.phase}
             currentAnalysis={state.currentAnalysis}
             currentReplies={state.currentReplies}
@@ -260,7 +275,10 @@ function AppContent() {
             generationStep={state.generationStep}
             streamingText={state.streamingText}
             favorabilityHistory={state.favorabilityHistory}
-            onSelectReply={(reply) => selectReplyAction(reply)}
+            replyVersions={state.replyVersions}
+            activeVersionIndex={state.activeVersionIndex}
+            onSwitchVersion={(index) => dispatch({ type: 'SWITCH_VERSION', index })}
+            onSelectReply={(reply, aiMessageId) => selectReplyAction(reply, aiMessageId)}
             onCustomReply={sendCustomReply}
             onRegenerate={handleRegenerate}
             onFeedback={handleFeedback}
@@ -278,6 +296,8 @@ function AppContent() {
             onAIAssist={triggerAI}
             onReset={handleReset}
             isGenerating={state.phase === 'generating'}
+            quickMode={quickMode}
+            onQuickModeChange={setQuickMode}
           />
           <ErrorBoundary boundaryName="聊天记录" fallback={(err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>

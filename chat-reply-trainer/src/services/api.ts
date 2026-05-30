@@ -1,4 +1,4 @@
-import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption } from '../types';
+import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption, ReplySelection } from '../types';
 
 const BASE = '/api';
 
@@ -95,6 +95,7 @@ export function generateReplyStream(
   provider: string = 'zhipu',
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
+  mode: string = 'full',
 ): AbortController {
   const ctrl = new AbortController();
   const token = localStorage.getItem('token');
@@ -103,7 +104,7 @@ export function generateReplyStream(
   fetch(`${BASE}/sessions/${sessionId}/generate`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ herMessage, provider }),
+    body: JSON.stringify({ herMessage, provider, mode }),
     signal: ctrl.signal,
   }).then(async (res) => {
     if (!res.ok) {
@@ -141,10 +142,10 @@ export function generateReplyStream(
   return ctrl;
 }
 
-export const selectReply = (sessionId: string, replyId: number) =>
-  request<{ success: boolean }>(`/sessions/${sessionId}/select-reply`, {
+export const selectReply = (sessionId: string, replyId: number, aiMessageId?: string) =>
+  request<{ success: boolean; messageId: string }>(`/sessions/${sessionId}/select-reply`, {
     method: 'POST',
-    body: JSON.stringify({ replyId }),
+    body: JSON.stringify({ replyId, aiMessageId }),
   });
 
 export const customReply = (sessionId: string, text: string) =>
@@ -153,11 +154,14 @@ export const customReply = (sessionId: string, text: string) =>
     body: JSON.stringify({ text }),
   });
 
-export const regenerate = (sessionId: string, preferredStrategy?: string) =>
+export const regenerate = (sessionId: string, opts?: { preferredStrategy?: string; mode?: string; provider?: string; roundId?: string }) =>
   request<GenerateResponse>(`/sessions/${sessionId}/regenerate`, {
     method: 'POST',
-    body: JSON.stringify({ preferredStrategy }),
+    body: JSON.stringify(opts ?? {}),
   });
+
+export const getReplySelections = (sessionId: string) =>
+  request<ReplySelection[]>(`/sessions/${sessionId}/selections`);
 
 export const sendFeedback = (sessionId: string, replyId: number, rating: 'thumbs_up' | 'thumbs_down') =>
   request<{ success: boolean }>(`/sessions/${sessionId}/feedback`, {

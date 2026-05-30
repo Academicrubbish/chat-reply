@@ -1,15 +1,17 @@
 import React from 'react';
-import { Avatar, Badge, Button, Space, Popconfirm } from 'antd';
-import { RobotOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Avatar, Badge, Button, Space, Popconfirm, Switch, Tooltip } from 'antd';
+import { RobotOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 
 interface ChatHeaderProps {
   targetName: string;
   onAIAssist: () => void;
   onReset: () => void;
   isGenerating: boolean;
+  quickMode: boolean;
+  onQuickModeChange: (checked: boolean) => void;
 }
 
-const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset, isGenerating }) => {
+const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset, isGenerating, quickMode, onQuickModeChange }) => {
   return (
     <div style={{ background: '#fff', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
       <Space>
@@ -20,6 +22,12 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset
         <Badge status="success" />
       </Space>
       <Space>
+        <Tooltip title={quickMode ? '快速模式：精简分析，仅出 2 条回复' : '完整模式：深度分析 + 3-4 条回复'}>
+          <Space size={4} style={{ fontSize: 12, color: quickMode ? '#fa8c16' : '#999' }}>
+            <ThunderboltOutlined style={{ color: quickMode ? '#fa8c16' : '#999' }} />
+            <Switch size="small" checked={quickMode} onChange={onQuickModeChange} />
+          </Space>
+        </Tooltip>
         <Button
           data-tour-id="ai-assist-btn"
           type="primary"
@@ -27,7 +35,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset
           onClick={onAIAssist}
           loading={isGenerating}
         >
-          {isGenerating ? '分析中...' : 'AI 辅助'}
+          {isGenerating ? (quickMode ? '快速生成中...' : '分析中...') : 'AI 辅助'}
         </Button>
         <Popconfirm
           title="确定清空所有聊天记录？"

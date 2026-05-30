@@ -114,3 +114,46 @@ ${chatHistory || '（暂无聊天记录）'}
 - favorabilityReason必须给出具体依据，结合对方语气、回复频率、内容态度等分析
 - 只返回JSON，不要返回其他内容`;
 }
+
+export function buildQuickPrompt(params: PromptParams): string {
+  const { target, recentMessages, feedbackPreferences } = params;
+
+  const toneMap: Record<string, string> = {
+    aggressive: '大胆推进',
+    moderate: '温和适中',
+    conservative: '稳扎稳打',
+  };
+
+  const chatHistory = recentMessages.slice(-6).map(m => {
+    if (m.role === 'scene') return `【场景】${m.text}`;
+    return `${m.role === 'her' ? '对方' : '我'}：${m.text}`;
+  }).join('\n');
+
+  return `你是社交聊天辅导AI。根据对方最新消息，快速生成3条风格各异的回复。
+
+## 策略库
+- 扩大冲突：调侃升级，用反问/夸张回应挑衅
+- 魔趣法则：有趣的夸张画面，制造好奇心
+- 平衡艺术：赞美+轻松转折，化解严肃感
+- 释放性信息：恰到好处地表露兴趣
+- 安全回复：稳妥不出错
+
+## 对方信息
+名字：${target.name}
+语气风格：${toneMap[target.tone_level] || '温和适中'}${target.forbidden_topics ? `\n话题禁区：${target.forbidden_topics}` : ''}
+
+${feedbackPreferences ? `## 用户偏好\n${feedbackPreferences}\n` : ''}
+## 最近聊天
+${chatHistory || '（暂无）'}
+
+## 输出要求
+返回JSON，包含分析和3条回复：
+{"analysis":{"stage":"关系阶段","signal":"信号类型","strategy":"推荐策略","signalText":"简要分析1-2句","emotions":["情绪标签"],"tip":"","favorability":0-100,"favorabilityReason":"判断依据"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"为什么这样回"}]}
+
+要求：
+- analysis.signal 可选值：正面冲突、正面无冲突、模糊、负面
+- 3条回复风格各不相同，至少覆盖2种不同策略
+- 回复口语化自然，长度与对方发言匹配
+- 遵守话题禁区，参考用户偏好调整策略
+- 只返回JSON，不要其他内容`;
+}

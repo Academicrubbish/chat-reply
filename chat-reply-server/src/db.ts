@@ -213,11 +213,31 @@ export async function initDb(): Promise<void> {
       session_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      round_id TEXT DEFAULT NULL,
+      version INTEGER DEFAULT 1,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_ai_messages_session ON ai_messages(session_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_round ON ai_messages(session_id, round_id, version);
+
+    CREATE TABLE IF NOT EXISTS reply_selections (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      ai_message_id TEXT NOT NULL,
+      reply_id INTEGER NOT NULL,
+      reply_text TEXT NOT NULL,
+      strategy TEXT,
+      chat_message_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES ai_sessions(id),
+      FOREIGN KEY (ai_message_id) REFERENCES ai_messages(id),
+      FOREIGN KEY (chat_message_id) REFERENCES chat_messages(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reply_selections_session ON reply_selections(session_id);
+    CREATE INDEX IF NOT EXISTS idx_reply_selections_ai_msg ON reply_selections(ai_message_id);
 
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -230,6 +250,14 @@ export async function initDb(): Promise<void> {
   // Migrate existing databases: add user_id to chat_targets if missing
   try {
     dbWrapper.exec(`ALTER TABLE chat_targets ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`);
+  } catch {}
+
+  // Migrate: add round_id and version to ai_messages if missing
+  try {
+    dbWrapper.exec(`ALTER TABLE ai_messages ADD COLUMN round_id TEXT DEFAULT NULL`);
+  } catch {}
+  try {
+    dbWrapper.exec(`ALTER TABLE ai_messages ADD COLUMN version INTEGER DEFAULT 1`);
   } catch {}
 
   dbReady = true;
