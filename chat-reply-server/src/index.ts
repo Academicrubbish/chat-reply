@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
-import { buildSystemPrompt, buildQuickPrompt } from './prompt';
+import { buildSystemPrompt, buildQuickPrompt, buildAdvisorPrompt, buildReviewPrompt } from './prompt';
 import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -673,6 +673,99 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'AI 服务异常' });
   }
+});
+
+// ===== Advisor Analysis & Review Summary =====
+app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => {
+  try {
+    const { mode, provider } = req.body;
+    if (mode !== 'advisor' && mode !== 'review') { res.status(400).json({ error: '无效的分析模式' }); return; }
+
+    const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
+    if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
+
+    const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(session.target_id) as any;
+    if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+
+    const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 30').all(target.id).reverse();
+    if (recentMessages.length < 2) { res.status(400).json({ error: '聊天记录太少，至少需要2条消息才能分析' }); return; }
+
+    // SSE headers
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+
+    send('step', { step: 'analyzing' });
+
+    // Build prompt based on mode
+    let systemPrompt: string;
+    if (mode === 'advisor') {
+      systemPrompt = buildAdvisorPrompt({ target, recentMessages: recentMessages as any[], contextSummary: session.context_summary || '' });
+    } else {
+      const selections = db.prepare('SELECT reply_text, strategy FROM reply_selections WHERE session_id = ? ORDER BY created_at ASC').all(session.id) as any[];
+      systemPrompt = buildReviewPrompt({ target, recentMessages: recentMessages as any[], replySelections: selections || [] });
+    }
+
+    const conversationMessages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: mode === 'advisor' ? '请分析对方当前的状态' : '请复盘我的聊天表现' },
+    ];
+
+    // Stream LLM response
+    let raw = '';
+    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
+    try {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 2048)) {
+        raw += delta;
+        send('delta', { text: delta });
+      }
+    } finally {
+      clearInterval(heartbeatTimer);
+    }
+
+    // Parse response
+    send('step', { step: 'parsing' });
+    let parsed = parseJsonSafely(raw);
+    if (!parsed) {
+      console.error('[Analyze Parse Error] Raw:', raw.slice(0, 500));
+      res.write(`event: error\ndata: ${JSON.stringify({ message: '分析结果解析失败，请重试' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Save to DB
+    const aiMsgId = uuid();
+    db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, msg_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(aiMsgId, session.id, 'assistant', JSON.stringify(parsed), null, 1, mode, Date.now());
+
+    send('analysis_done', { result: parsed, aiMessageId: aiMsgId });
+    res.end();
+  } catch (err: any) {
+    console.error('Analyze error:', err);
+    try {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || '分析服务异常' })}\n\n`);
+      res.end();
+    } catch {}
+  }
+});
+
+// ===== Get Analysis History by Target =====
+app.get('/api/targets/:targetId/analyses', (req: any, res: Response) => {
+  const { type } = req.query;
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.targetId) as any;
+  if (!target || target.user_id !== req.user.userId) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+
+  const sessionIds = db.prepare('SELECT id FROM ai_sessions WHERE target_id = ?').all(req.params.targetId).map((s: any) => s.id);
+  if (sessionIds.length === 0) { res.json([]); return; }
+
+  const placeholders = sessionIds.map(() => '?').join(',');
+  let query = `SELECT id, msg_type, content, created_at FROM ai_messages WHERE session_id IN (${placeholders}) AND msg_type IN ('advisor', 'review')`;
+  const params: any[] = [...sessionIds];
+  if (type === 'advisor' || type === 'review') {
+    query += ' AND msg_type = ?';
+    params.push(type);
+  }
+  query += ' ORDER BY created_at DESC LIMIT 50';
+  res.json(db.prepare(query).all(...params));
 });
 
 app.post('/api/sessions/:sessionId/feedback', (req: any, res: Response) => {

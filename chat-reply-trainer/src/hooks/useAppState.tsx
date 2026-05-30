@@ -25,6 +25,12 @@ const initialState: AppState = {
   replyVersions: [],
   activeVersionIndex: 0,
   replySelections: [],
+  analysisDrawerOpen: false,
+  analysisResult: null,
+  analysisMode: null,
+  isAnalyzing: false,
+  analysisStep: 'idle' as const,
+  analysisHistory: [],
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -226,6 +232,30 @@ function reducer(state: AppState, action: AppAction): AppState {
       const next = order[state.generationStep];
       return next ? { ...state, generationStep: next } : state;
     }
+    case 'TRIGGER_ANALYSIS':
+      return {
+        ...state,
+        analysisDrawerOpen: true,
+        analysisMode: action.analysisMode,
+        analysisResult: null,
+        isAnalyzing: true,
+        streamingText: '',
+        error: null,
+      };
+    case 'ANALYSIS_SUCCESS':
+      return { ...state, analysisResult: action.data, isAnalyzing: false };
+    case 'ANALYSIS_FAILURE':
+      return { ...state, isAnalyzing: false, error: action.error };
+    case 'CLOSE_ANALYSIS_DRAWER':
+      return { ...state, analysisDrawerOpen: false, streamingText: '', analysisStep: 'idle' as const };
+    case 'OPEN_ANALYSIS_DRAWER':
+      return { ...state, analysisDrawerOpen: true, analysisResult: null, isAnalyzing: false, analysisMode: null };
+    case 'ANALYSIS_STEP':
+      return { ...state, analysisStep: action.step };
+    case 'ANALYSIS_DELTA':
+      return { ...state, streamingText: state.streamingText + action.text };
+    case 'SET_ANALYSIS_HISTORY':
+      return { ...state, analysisHistory: action.history };
     default:
       return state;
   }
@@ -260,8 +290,9 @@ interface AppContextValue {
   models: ModelOption[];
   selectedProvider: string;
   setSelectedProvider: (provider: string) => void;
-  quickMode: boolean;
-  setQuickMode: (mode: boolean) => void;
+  aiMode: 'full' | 'quick' | 'advisor' | 'review';
+  setAiMode: (mode: 'full' | 'quick' | 'advisor' | 'review') => void;
+  triggerAnalysis: (mode: 'advisor' | 'review') => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -271,7 +302,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeAbortRef = useRef<AbortController | null>(null);
   const [selectedProvider, setSelectedProvider] = useState('zhipu');
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [quickMode, setQuickMode] = useState(false);
+  const [aiMode, setAiMode] = useState<'full' | 'quick' | 'advisor' | 'review'>('full');
 
   useEffect(() => {
     api.getModels().then(({ models }) => setModels(models)).catch(() => {});
@@ -293,6 +324,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (activeSession) {
       await loadSessionAiMessages(activeSession.id, dispatch);
     }
+    // Load analysis history for this target
+    api.getAnalyses(id).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
   };
 
   const sendHerMessage = (text: string) => {
@@ -310,9 +343,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!state.currentTargetId) return;
     // Cancel any previous in-flight request
     activeAbortRef.current?.abort();
-    dispatch({ type: 'TRIGGER_AI', mode: quickMode ? 'quick' : 'full' });
+    dispatch({ type: 'TRIGGER_AI', mode: aiMode === 'quick' ? 'quick' : 'full' });
 
-    const mode = quickMode ? 'quick' : 'full';
+    const mode = aiMode === 'quick' ? 'quick' : 'full';
 
     let sessionId = state.currentSessionId;
     if (!sessionId) {
@@ -403,6 +436,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
     activeAbortRef.current = ctrl;
   };
 
+  const triggerAnalysis = async (mode: 'advisor' | 'review') => {
+    if (!state.currentTargetId) return;
+    activeAbortRef.current?.abort();
+    dispatch({ type: 'TRIGGER_ANALYSIS', analysisMode: mode });
+
+    let sessionId = state.currentSessionId;
+    if (!sessionId) {
+      try {
+        const session = await api.createSession(state.currentTargetId);
+        sessionId = session.id;
+        dispatch({ type: 'UPDATE_SESSIONS', sessions: await api.getSessions(state.currentTargetId), currentSessionId: sessionId });
+      } catch { return; }
+    }
+
+    const ctrl = api.analyzeStream(
+      sessionId, mode, selectedProvider,
+      (evt) => {
+        if (evt.event === 'step') {
+          dispatch({ type: 'ANALYSIS_STEP', step: evt.data.step });
+        } else if (evt.event === 'delta') {
+          dispatch({ type: 'ANALYSIS_DELTA', text: evt.data.text });
+        } else if (evt.event === 'analysis_done') {
+          dispatch({ type: 'ANALYSIS_SUCCESS', analysisMode: mode, data: evt.data.result });
+          dispatch({ type: 'ANALYSIS_STEP', step: 'done' });
+          // Refresh history after successful analysis
+          if (state.currentTargetId) {
+            api.getAnalyses(state.currentTargetId).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
+          }
+        }
+      },
+      (err) => {
+        if (err.name !== 'AbortError') {
+          dispatch({ type: 'ANALYSIS_FAILURE', error: err.message });
+        }
+      },
+    );
+    activeAbortRef.current = ctrl;
+  };
+
   const selectReplyAction = async (reply: { id: number; text: string; strategy: string }, aiMessageId?: string) => {
     if (!state.currentSessionId || !state.currentTargetId) return;
     try {
@@ -467,7 +539,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, dispatch, selectTarget, sendHerMessage, triggerAI,
       selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
       models, selectedProvider, setSelectedProvider,
-      quickMode, setQuickMode,
+      aiMode, setAiMode, triggerAnalysis,
     }}>
       {children}
     </AppContext.Provider>

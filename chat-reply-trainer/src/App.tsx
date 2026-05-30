@@ -13,16 +13,15 @@ import SignUpPage from './components/SignUpPage';
 import OnboardingPage from './components/OnboardingPage';
 import TargetSelector from './components/TargetSelector';
 import TargetModal from './components/TargetModal';
-import PersonCard from './components/PersonCard';
-import SessionBar from './components/SessionBar';
-import ContextBar from './components/ContextBar';
+import Toolbar from './components/Toolbar';
 import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
+import AnalysisDrawer from './components/AnalysisDrawer';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, quickMode, setQuickMode } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -126,7 +125,7 @@ function AppContent() {
 
     try {
       const data = await api.regenerate(state.currentSessionId, {
-        mode: quickMode ? 'quick' : 'full',
+        mode: aiMode === 'quick' ? 'quick' : 'full',
         provider: selectedProvider,
         roundId: currentRoundId,
       });
@@ -242,11 +241,18 @@ function AppContent() {
           data-tour-id="ai-panel"
           style={isMobile ? { display: mobileTab === 'ai' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', borderRight: 'none' } : undefined}
         >
-          <PersonCard
+          <Toolbar
             target={currentTarget}
-            onEdit={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
-          />
-          <SessionBar
+            onEditTarget={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
+            onAIAssist={() => {
+              if (aiMode === 'advisor' || aiMode === 'review') {
+                triggerAnalysis(aiMode);
+              } else {
+                triggerAI();
+              }
+            }}
+            isGenerating={state.phase === 'generating' || state.isAnalyzing}
+            aiMode={aiMode}
             session={state.sessions.find(s => s.id === state.currentSessionId) || null}
             sessions={state.sessions}
             onSelectSession={switchSession}
@@ -255,8 +261,12 @@ function AppContent() {
             models={models}
             selectedProvider={selectedProvider}
             onSelectProvider={setSelectedProvider}
+            onTriggerAnalysis={triggerAnalysis}
+            onShowHistory={() => dispatch({ type: 'OPEN_ANALYSIS_DRAWER' })}
+            isAnalyzing={state.isAnalyzing}
+            analysisMode={state.analysisMode}
+            analysis={state.currentAnalysis}
           />
-          <ContextBar analysis={state.currentAnalysis} />
 
           {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
           <ErrorBoundary boundaryName="AI分析" fallback={(err, retry) => (
@@ -293,11 +303,9 @@ function AppContent() {
         >
           <ChatHeader
             targetName={currentTarget?.name || ''}
-            onAIAssist={triggerAI}
             onReset={handleReset}
-            isGenerating={state.phase === 'generating'}
-            quickMode={quickMode}
-            onQuickModeChange={setQuickMode}
+            aiMode={aiMode}
+            onAiModeChange={setAiMode}
           />
           <ErrorBoundary boundaryName="聊天记录" fallback={(err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -333,6 +341,24 @@ function AppContent() {
         target={state.editingTarget}
         onClose={() => dispatch({ type: 'CLOSE_MODAL' })}
         onSave={handleSaveTarget}
+      />
+
+      {/* Analysis Drawer */}
+      <AnalysisDrawer
+        open={state.analysisDrawerOpen}
+        onClose={() => dispatch({ type: 'CLOSE_ANALYSIS_DRAWER' })}
+        analysisMode={state.analysisMode}
+        result={state.analysisResult}
+        isAnalyzing={state.isAnalyzing}
+        targetName={currentTarget?.name || ''}
+        analysisStep={state.analysisStep}
+        history={state.analysisHistory}
+        onSelectHistory={(record) => {
+          try {
+            const parsed = JSON.parse(record.content);
+            dispatch({ type: 'ANALYSIS_SUCCESS', analysisMode: record.msg_type, data: parsed });
+          } catch {}
+        }}
       />
     </>
   );

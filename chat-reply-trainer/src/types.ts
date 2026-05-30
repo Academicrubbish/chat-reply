@@ -105,6 +105,28 @@ export interface GenerateResponse {
   version?: number;
 }
 
+export type AiMode = 'full' | 'quick' | 'advisor' | 'review';
+
+export interface AdvisorAnalysis {
+  attitude: { status: string; detail: string; evidence: string };
+  emotion: { type: string; detail: string; evidence: string };
+  thought: { intention: string; expectation: string; detail: string };
+  nextStep: { action: string; strategy: string; keyPoints: string[]; warnings: string[] };
+}
+
+export interface ReviewAnalysis {
+  highlights: Array<{ round: number; action: string; why: string; tip: string }>;
+  mistakes: Array<{ round: number; action: string; why: string; better: string }>;
+  overall: { score: number; summary: string; strengths: string[]; weaknesses: string[]; advice: string };
+}
+
+export interface AnalysisRecord {
+  id: string;
+  msg_type: 'advisor' | 'review';
+  content: string;
+  created_at: number;
+}
+
 export type AppPhase = 'idle' | 'her_sent' | 'generating' | 'waiting_select';
 
 export interface ModelOption {
@@ -134,13 +156,19 @@ export interface AppState {
   replyVersions: ReplyVersion[];
   activeVersionIndex: number;
   replySelections: ReplySelection[];
+  analysisDrawerOpen: boolean;
+  analysisResult: AdvisorAnalysis | ReviewAnalysis | null;
+  analysisMode: 'advisor' | 'review' | null;
+  isAnalyzing: boolean;
+  analysisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
+  analysisHistory: AnalysisRecord[];
 }
 
 export type AppAction =
   | { type: 'SET_TARGETS'; targets: ChatTarget[] }
   | { type: 'SELECT_TARGET'; targetId: string; messages: ChatMessage[]; sessions: AISession[] }
   | { type: 'SEND_HER_MESSAGE'; message: ChatMessage }
-  | { type: 'TRIGGER_AI'; mode: 'quick' | 'full' }
+  | { type: 'TRIGGER_AI'; mode: AiMode }
   | { type: 'STREAM_REPLY_READY'; reply: ReplyOption; index: number }
   | { type: 'GENERATE_SUCCESS'; data: GenerateResponse }
   | { type: 'GENERATE_FAILURE'; error: string }
@@ -164,4 +192,12 @@ export type AppAction =
   | { type: 'TRIGGER_REGENERATE' }
   | { type: 'SWITCH_VERSION'; index: number }
   | { type: 'ADVANCE_REGEN_STEP' }
-  | { type: 'SET_REPLY_SELECTIONS'; selections: ReplySelection[] };
+  | { type: 'SET_REPLY_SELECTIONS'; selections: ReplySelection[] }
+  | { type: 'TRIGGER_ANALYSIS'; analysisMode: 'advisor' | 'review' }
+  | { type: 'ANALYSIS_SUCCESS'; analysisMode: 'advisor' | 'review'; data: any }
+  | { type: 'ANALYSIS_FAILURE'; error: string }
+  | { type: 'CLOSE_ANALYSIS_DRAWER' }
+  | { type: 'OPEN_ANALYSIS_DRAWER' }
+  | { type: 'ANALYSIS_STEP'; step: 'analyzing' | 'generating' | 'parsing' | 'done' }
+  | { type: 'ANALYSIS_DELTA'; text: string }
+  | { type: 'SET_ANALYSIS_HISTORY'; history: AnalysisRecord[] };

@@ -4,6 +4,7 @@ import {
   LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled,
   ReloadOutlined, SendOutlined,
   CheckCircleFilled, CheckOutlined, LoadingOutlined,
+  LeftOutlined, RightOutlined,
 } from '@ant-design/icons';
 import type { AIMessage, AnalysisData, ReplyOption, AppPhase, GenerationStep, FavorabilityRecord, ReplyVersion, ChatMessage, ReplySelection } from '../types';
 
@@ -208,6 +209,7 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
       {contextHolder}
       <div
         onClick={handleClick}
+        className={selected ? 'reply-card reply-card-selected' : 'reply-card'}
         style={{
           padding: '8px 10px',
           border: selected ? '2px solid #1677ff' : '1px solid #e8e8e8',
@@ -218,8 +220,6 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
           boxShadow: selected ? '0 0 0 2px rgba(22,119,255,0.1)' : 'none',
           animation: 'replyFadeIn 0.3s ease-out',
         }}
-        onMouseEnter={e => { if (!selected) e.currentTarget.style.borderColor = '#3b5998'; }}
-        onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = '#e8e8e8'; }}
       >
         <Tag color={strategyTagColor[reply.strategy] || 'default'} style={{ marginBottom: 4 }}>
           {reply.strategy}
@@ -254,7 +254,7 @@ function VersionSwitcher({ current, total, onSwitch }: {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
       <Button size="small" type="text"
-        icon={<span style={{ fontSize: 12 }}>←</span>}
+        icon={<LeftOutlined />}
         disabled={current <= 0}
         onClick={() => onSwitch(current - 1)}
       />
@@ -262,7 +262,7 @@ function VersionSwitcher({ current, total, onSwitch }: {
         {current + 1} / {total}
       </span>
       <Button size="small" type="text"
-        icon={<span style={{ fontSize: 12 }}>→</span>}
+        icon={<RightOutlined />}
         disabled={current >= total - 1}
         onClick={() => onSwitch(current + 1)}
       />
@@ -585,8 +585,3 @@ const RoundTimeline = React.memo(function RoundTimeline({
 });
 
 export default RoundTimeline;
-
-// Progressive reply card fade-in animation
-const styleEl = document.createElement('style');
-styleEl.textContent = `@keyframes replyFadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`;
-document.head.appendChild(styleEl);

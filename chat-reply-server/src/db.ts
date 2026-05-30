@@ -265,6 +265,14 @@ export async function initDb(): Promise<void> {
     dbWrapper.exec(`ALTER TABLE ai_sessions ADD COLUMN context_summary TEXT DEFAULT ''`);
   } catch {}
 
+  // Migrate: add msg_type to ai_messages for advisor/review analysis
+  try {
+    dbWrapper.exec(`ALTER TABLE ai_messages ADD COLUMN msg_type TEXT DEFAULT 'reply'`);
+  } catch {}
+  try {
+    dbWrapper.exec(`CREATE INDEX IF NOT EXISTS idx_ai_messages_type ON ai_messages(session_id, msg_type)`);
+  } catch {}
+
   dbReady = true;
 }
 
