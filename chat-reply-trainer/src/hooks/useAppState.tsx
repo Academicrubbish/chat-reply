@@ -180,23 +180,27 @@ function reducer(state: AppState, action: AppAction): AppState {
         replyVersions: [],
         activeVersionIndex: 0,
       };
-    case 'UPDATE_SESSIONS':
+    case 'UPDATE_SESSIONS': {
+      // Only clear reply state when session actually changes (switching), not on refresh
+      const sessionChanged = action.currentSessionId !== state.currentSessionId;
       return {
         ...state,
         sessions: action.sessions,
         currentSessionId: action.currentSessionId,
-        // Clear reply-related state on session switch to avoid stale cards
-        phase: 'idle',
-        generationStep: 'idle',
-        currentAnalysis: null,
-        currentReplies: null,
-        currentPlan: null,
-        contextUsage: null,
-        replyVersions: [],
-        activeVersionIndex: 0,
-        streamingText: '',
-        error: null,
+        ...(sessionChanged ? {
+          phase: 'idle',
+          generationStep: 'idle',
+          currentAnalysis: null,
+          currentReplies: null,
+          currentPlan: null,
+          contextUsage: null,
+          replyVersions: [],
+          activeVersionIndex: 0,
+          streamingText: '',
+          error: null,
+        } : {}),
       };
+    }
     case 'SET_AI_MESSAGES':
       return { ...state, aiMessages: action.aiMessages };
     case 'SET_REPLY_SELECTIONS':
@@ -252,27 +256,30 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'TRIGGER_ANALYSIS':
       return {
         ...state,
-        analysisDrawerOpen: true,
+        analysisDrawerOpen: false,
         analysisMode: action.analysisMode,
         analysisResult: null,
         isAnalyzing: true,
+        analysisStep: 'analyzing' as const,
         streamingText: '',
         error: null,
       };
     case 'ANALYSIS_SUCCESS':
-      return { ...state, analysisResult: action.data, isAnalyzing: false };
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisDrawerOpen: true };
     case 'ANALYSIS_FAILURE':
-      return { ...state, isAnalyzing: false, error: action.error };
+      return { ...state, isAnalyzing: false, analysisStep: 'idle' as const, error: action.error };
     case 'CLOSE_ANALYSIS_DRAWER':
-      return { ...state, analysisDrawerOpen: false, streamingText: '', analysisStep: 'idle' as const };
+      return { ...state, analysisDrawerOpen: false };
     case 'OPEN_ANALYSIS_DRAWER':
-      return { ...state, analysisDrawerOpen: true, analysisResult: null, isAnalyzing: false, analysisMode: null };
+      return { ...state, analysisDrawerOpen: true, analysisResult: null, analysisMode: null };
     case 'ANALYSIS_STEP':
       return { ...state, analysisStep: action.step };
     case 'ANALYSIS_DELTA':
       return { ...state, streamingText: state.streamingText + action.text };
     case 'SET_ANALYSIS_HISTORY':
       return { ...state, analysisHistory: action.history };
+    case 'VIEW_HISTORY_ANALYSIS':
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, analysisDrawerOpen: true };
     default:
       return state;
   }
@@ -458,8 +465,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const triggerAnalysis = async (mode: 'advisor' | 'review') => {
     if (!state.currentTargetId) return;
     activeAbortRef.current?.abort();
-    dispatch({ type: 'TRIGGER_ANALYSIS', analysisMode: mode });
 
+    // Ensure session exists BEFORE dispatching TRIGGER_ANALYSIS (UPDATE_SESSIONS resets state)
     let sessionId = state.currentSessionId;
     if (!sessionId) {
       try {
@@ -468,6 +475,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'UPDATE_SESSIONS', sessions: await api.getSessions(state.currentTargetId), currentSessionId: sessionId });
       } catch { return; }
     }
+    dispatch({ type: 'TRIGGER_ANALYSIS', analysisMode: mode });
 
     const ctrl = api.analyzeStream(
       sessionId, mode, selectedProvider,
@@ -536,6 +544,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const switchSession = async (sessionId: string) => {
+    activeAbortRef.current?.abort();
     dispatch({ type: 'UPDATE_SESSIONS', sessions: state.sessions, currentSessionId: sessionId });
     await loadSessionAiMessages(sessionId, dispatch);
   };

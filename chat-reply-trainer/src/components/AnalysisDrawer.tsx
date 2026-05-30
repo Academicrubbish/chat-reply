@@ -12,7 +12,7 @@ const ANALYSIS_STEP_ITEMS = [
   { key: 'parsing', label: '生成报告' },
 ];
 
-function AnalysisSteps({ currentStep }: { currentStep: AnalysisStep }) {
+export function AnalysisSteps({ currentStep }: { currentStep: AnalysisStep }) {
   const stepOrder: Record<string, number> = { idle: -1, analyzing: 0, generating: 1, parsing: 2, done: 3 };
   const activeIdx = stepOrder[currentStep] ?? -1;
 
@@ -264,16 +264,14 @@ interface AnalysisDrawerProps {
   onClose: () => void;
   analysisMode: 'advisor' | 'review' | null;
   result: AdvisorAnalysis | ReviewAnalysis | null;
-  isAnalyzing: boolean;
   targetName: string;
-  analysisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
   history: AnalysisRecord[];
   onSelectHistory: (record: AnalysisRecord) => void;
 }
 
 const AnalysisDrawer: React.FC<AnalysisDrawerProps> = ({
-  open, onClose, analysisMode, result, isAnalyzing, targetName,
-  analysisStep, history, onSelectHistory,
+  open, onClose, analysisMode, result, targetName,
+  history, onSelectHistory,
 }) => {
   const title = analysisMode === 'advisor'
     ? `🎯 军师分析 — ${targetName}`
@@ -290,11 +288,7 @@ const AnalysisDrawer: React.FC<AnalysisDrawerProps> = ({
       onClose={onClose}
       styles={{ body: { padding: '16px 20px', overflowY: 'auto' } }}
     >
-      {isAnalyzing && !result ? (
-        <Card size="small" style={{ borderLeft: '3px solid #3b5998', marginBottom: 16 }}>
-          <AnalysisSteps currentStep={analysisStep} />
-        </Card>
-      ) : result ? (
+      {result ? (
         analysisMode === 'advisor' ? (
           <AdvisorView data={result as AdvisorAnalysis} />
         ) : (

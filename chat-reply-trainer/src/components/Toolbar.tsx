@@ -130,12 +130,14 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <Tooltip title="分析对方态度、情绪、想法，给出下一步方案">
               <Button size="small" icon={<BulbOutlined />}
                 loading={isAnalyzing && analysisMode === 'advisor'}
+                disabled={isAnalyzing}
                 onClick={() => onTriggerAnalysis('advisor')}
               >军师</Button>
             </Tooltip>
             <Tooltip title="复盘聊天亮点与踩坑，帮助提升技巧">
               <Button size="small" icon={<BarChartOutlined />}
                 loading={isAnalyzing && analysisMode === 'review'}
+                disabled={isAnalyzing}
                 onClick={() => onTriggerAnalysis('review')}
               >复盘</Button>
             </Tooltip>

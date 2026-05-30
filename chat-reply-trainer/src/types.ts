@@ -200,4 +200,5 @@ export type AppAction =
   | { type: 'OPEN_ANALYSIS_DRAWER' }
   | { type: 'ANALYSIS_STEP'; step: 'analyzing' | 'generating' | 'parsing' | 'done' }
   | { type: 'ANALYSIS_DELTA'; text: string }
-  | { type: 'SET_ANALYSIS_HISTORY'; history: AnalysisRecord[] };
+  | { type: 'SET_ANALYSIS_HISTORY'; history: AnalysisRecord[] }
+  | { type: 'VIEW_HISTORY_ANALYSIS'; analysisMode: 'advisor' | 'review'; data: any };

@@ -18,7 +18,8 @@ import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
-import AnalysisDrawer from './components/AnalysisDrawer';
+import AnalysisDrawer, { AnalysisSteps } from './components/AnalysisDrawer';
+import { Card } from 'antd';
 
 function AppContent() {
   const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis } = useAppState();
@@ -268,6 +269,18 @@ function AppContent() {
             analysis={state.currentAnalysis}
           />
 
+          {/* Analysis step chain — visible in main panel during generation */}
+          {state.isAnalyzing && (
+            <Card size="small" style={{ margin: '8px 20px', borderLeft: '3px solid #3b5998' }}>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#3b5998' }}>
+                  {state.analysisMode === 'advisor' ? '军师分析中...' : '复盘总结中...'}
+                </span>
+              </div>
+              <AnalysisSteps currentStep={state.analysisStep} />
+            </Card>
+          )}
+
           {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
           <ErrorBoundary boundaryName="AI分析" fallback={(err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -349,14 +362,12 @@ function AppContent() {
         onClose={() => dispatch({ type: 'CLOSE_ANALYSIS_DRAWER' })}
         analysisMode={state.analysisMode}
         result={state.analysisResult}
-        isAnalyzing={state.isAnalyzing}
         targetName={currentTarget?.name || ''}
-        analysisStep={state.analysisStep}
         history={state.analysisHistory}
         onSelectHistory={(record) => {
           try {
             const parsed = JSON.parse(record.content);
-            dispatch({ type: 'ANALYSIS_SUCCESS', analysisMode: record.msg_type, data: parsed });
+            dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
           } catch {}
         }}
       />
