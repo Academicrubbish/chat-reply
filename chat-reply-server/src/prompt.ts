@@ -15,6 +15,7 @@ interface PromptParams {
   planGoal: string;
   planNextStep: string;
   feedbackPreferences: string;
+  contextSummary?: string;
 }
 
 export function buildSystemPrompt(params: PromptParams): string {
@@ -116,7 +117,7 @@ ${chatHistory || '（暂无聊天记录）'}
 }
 
 export function buildQuickPrompt(params: PromptParams): string {
-  const { target, recentMessages, feedbackPreferences } = params;
+  const { target, recentMessages, feedbackPreferences, contextSummary } = params;
 
   const toneMap: Record<string, string> = {
     aggressive: '大胆推进',
@@ -124,7 +125,7 @@ export function buildQuickPrompt(params: PromptParams): string {
     conservative: '稳扎稳打',
   };
 
-  const chatHistory = recentMessages.slice(-6).map(m => {
+  const chatHistory = recentMessages.slice(-4).map(m => {
     if (m.role === 'scene') return `【场景】${m.text}`;
     return `${m.role === 'her' ? '对方' : '我'}：${m.text}`;
   }).join('\n');
@@ -142,16 +143,18 @@ export function buildQuickPrompt(params: PromptParams): string {
 名字：${target.name}
 语气风格：${toneMap[target.tone_level] || '温和适中'}${target.forbidden_topics ? `\n话题禁区：${target.forbidden_topics}` : ''}
 
-${feedbackPreferences ? `## 用户偏好\n${feedbackPreferences}\n` : ''}
+${contextSummary ? `## 对话摘要\n${contextSummary}\n` : ''}${feedbackPreferences ? `## 用户偏好\n${feedbackPreferences}\n` : ''}
 ## 最近聊天
 ${chatHistory || '（暂无）'}
 
 ## 输出要求
-返回JSON，包含分析和3条回复：
-{"analysis":{"stage":"关系阶段","signal":"信号类型","strategy":"推荐策略","signalText":"简要分析1-2句","emotions":["情绪标签"],"tip":"","favorability":0-100,"favorabilityReason":"判断依据"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"为什么这样回"}]}
+严格返回以下格式的JSON（用短键名，不要多余字段）：
+{"signal":"信号类型","fav":0-100,"ctx":"50字以内的对话摘要，概括关系阶段、对方态度、近期话题，供下次快速回忆","replies":[{"s":"策略名","t":"回复文本"},{"s":"策略名","t":"回复文本"},{"s":"策略名","t":"回复文本"}]}
 
 要求：
-- analysis.signal 可选值：正面冲突、正面无冲突、模糊、负面
+- signal 可选值：正面冲突、正面无冲突、模糊、负面
+- fav 是好感度 0-100 的数字
+- ctx 是对话摘要，必须填写，50字以内
 - 3条回复风格各不相同，至少覆盖2种不同策略
 - 回复口语化自然，长度与对方发言匹配
 - 遵守话题禁区，参考用户偏好调整策略

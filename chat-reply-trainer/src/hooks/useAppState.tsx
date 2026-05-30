@@ -59,7 +59,12 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: null,
       };
     case 'TRIGGER_AI':
-      return { ...state, phase: 'generating', generationStep: 'analyze', streamingText: '', error: null, replyVersions: [], activeVersionIndex: 0 };
+      return {
+        ...state,
+        phase: 'generating',
+        generationStep: action.mode === 'quick' ? 'generating' : 'analyze',
+        streamingText: '', error: null, replyVersions: [], activeVersionIndex: 0,
+      };
     case 'GENERATE_SUCCESS': {
       const { analysis, plan, contextUsage, replies, roundId } = action.data;
       const newHistory = analysis
@@ -122,6 +127,23 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: null,
         replyVersions: versions,
         activeVersionIndex: versions.length - 1,
+      };
+    }
+    case 'STREAM_REPLY_READY': {
+      // Progressive: add individual reply as it arrives (quick mode only)
+      const current = state.currentReplies || [];
+      if (current.some(r => r.id === action.reply.id)) return state;
+      const updated = [...current, action.reply];
+      return {
+        ...state,
+        phase: 'waiting_select',
+        currentReplies: updated,
+        streamingText: '',
+        replyVersions: state.replyVersions.length > 0
+          ? state.replyVersions.map((v, i) =>
+              i === state.replyVersions.length - 1 ? { ...v, replies: updated } : v)
+          : [{ analysis: state.currentAnalysis, replies: updated }],
+        activeVersionIndex: Math.max(0, state.replyVersions.length - 1),
       };
     }
     case 'STREAM_DONE': {
@@ -288,7 +310,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!state.currentTargetId) return;
     // Cancel any previous in-flight request
     activeAbortRef.current?.abort();
-    dispatch({ type: 'TRIGGER_AI' });
+    dispatch({ type: 'TRIGGER_AI', mode: quickMode ? 'quick' : 'full' });
 
     const mode = quickMode ? 'quick' : 'full';
 
@@ -346,6 +368,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             break;
           case 'replies':
             dispatch({ type: 'STREAM_REPLIES', replies: evt.data });
+            break;
+          case 'reply_ready':
+            dispatch({ type: 'STREAM_REPLY_READY', reply: evt.data.reply, index: evt.data.index });
             break;
           case 'done':
             clearTimeout(analyzeTimer);

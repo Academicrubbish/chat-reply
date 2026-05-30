@@ -260,6 +260,11 @@ export async function initDb(): Promise<void> {
     dbWrapper.exec(`ALTER TABLE ai_messages ADD COLUMN version INTEGER DEFAULT 1`);
   } catch {}
 
+  // Migrate: add context_summary to ai_sessions if missing
+  try {
+    dbWrapper.exec(`ALTER TABLE ai_sessions ADD COLUMN context_summary TEXT DEFAULT ''`);
+  } catch {}
+
   dbReady = true;
 }
 

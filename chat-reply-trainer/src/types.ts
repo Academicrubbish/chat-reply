@@ -31,6 +31,7 @@ export interface AISession {
   context_tokens: number;
   plan_goal: string;
   plan_next_step: string;
+  context_summary: string;
   created_at: number;
 }
 
@@ -139,7 +140,8 @@ export type AppAction =
   | { type: 'SET_TARGETS'; targets: ChatTarget[] }
   | { type: 'SELECT_TARGET'; targetId: string; messages: ChatMessage[]; sessions: AISession[] }
   | { type: 'SEND_HER_MESSAGE'; message: ChatMessage }
-  | { type: 'TRIGGER_AI' }
+  | { type: 'TRIGGER_AI'; mode: 'quick' | 'full' }
+  | { type: 'STREAM_REPLY_READY'; reply: ReplyOption; index: number }
   | { type: 'GENERATE_SUCCESS'; data: GenerateResponse }
   | { type: 'GENERATE_FAILURE'; error: string }
   | { type: 'SELECT_REPLY'; message: ChatMessage }

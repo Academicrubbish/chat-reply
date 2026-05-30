@@ -305,6 +305,55 @@ function parseJsonSafely(text: string): any | null {
   return null;
 }
 
+// ===== Compact Quick Mode Normalizer =====
+
+function normalizeCompactResponse(parsed: any) {
+  // Detect compact format: replies use short keys s/t instead of strategy/text
+  if (!parsed.replies?.[0]?.s) return parsed; // not compact, return as-is
+  return {
+    signal: parsed.signal || '模糊',
+    fav: parsed.fav ?? 50,
+    ctx: parsed.ctx || '',
+    analysis: {
+      stage: '', signal: parsed.signal || '模糊', strategy: '',
+      signalText: '', emotions: [], tip: '',
+      favorability: parsed.fav ?? 50, favorabilityReason: '',
+    },
+    replies: (parsed.replies || []).map((r: any, i: number) => ({
+      id: i + 1, strategy: r.s || '安全回复', text: r.t || '', reason: '',
+    })),
+  };
+}
+
+// ===== Incremental Reply Extractor (for progressive streaming) =====
+
+function extractNewReplies(raw: string, alreadySent: number): any[] {
+  const repliesIdx = raw.indexOf('"replies"');
+  if (repliesIdx === -1) return [];
+  const arrStart = raw.indexOf('[', repliesIdx);
+  if (arrStart === -1) return [];
+
+  let depth = 0, inStr = false, esc = false, objStart = -1;
+  const found: any[] = [];
+
+  for (let i = arrStart + 1; i < raw.length; i++) {
+    const ch = raw[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\' && inStr) { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{') { if (depth === 0) objStart = i; depth++; }
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        try { found.push(JSON.parse(raw.slice(objStart, i + 1))); } catch {}
+        objStart = -1;
+      }
+    } else if (ch === ']' && depth === 0) break;
+  }
+  return found.slice(alreadySent);
+}
+
 // ===== AI Generate Core =====
 app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) => {
   try {
@@ -333,16 +382,18 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       .join('；');
 
     // Build system prompt
-    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: feedbackPrefs };
-    const systemPrompt = isQuick ? buildQuickPrompt(promptParams) : buildSystemPrompt(promptParams);
+    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: feedbackPrefs } as any;
+    const systemPrompt = isQuick
+      ? buildQuickPrompt({ ...promptParams, contextSummary: session.context_summary || '' })
+      : buildSystemPrompt(promptParams);
 
     // Build conversation messages for AI
     const conversationMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: systemPrompt },
     ];
     if (!isQuick) {
-      for (const aiMsg of aiMessages) {
-        conversationMessages.push({ role: aiMsg.role, content: aiMsg.content });
+      for (const aiMsg of aiMessages as any[]) {
+        conversationMessages.push({ role: aiMsg.role as string, content: aiMsg.content as string });
       }
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${herMessage}` });
@@ -376,9 +427,22 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     }, 2000);
 
     try {
+      let sentReplyCount = 0;
       for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 2048 : 4096)) {
         raw += delta;
         send('delta', { text: delta });
+
+        // Quick mode only: progressively detect and send complete replies
+        if (isQuick) {
+          const newReplies = extractNewReplies(raw, sentReplyCount);
+          for (const r of newReplies) {
+            const reply = r.s !== undefined
+              ? { id: sentReplyCount + 1, strategy: r.s || '安全回复', text: r.t || '', reason: '' }
+              : r;
+            send('reply_ready', { reply, index: sentReplyCount });
+            sentReplyCount++;
+          }
+        }
       }
     } finally {
       clearInterval(heartbeatTimer);
@@ -396,6 +460,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       console.log('[LLM] Using safe fallback response');
     }
 
+    // Quick mode: normalize compact format (s/t → strategy/text)
+    let quickCtx = '';
+    if (isQuick) {
+      const normalized = normalizeCompactResponse(parsed);
+      quickCtx = normalized.ctx || '';
+      parsed = normalized;
+    }
+
     console.log('[LLM Parsed] keys:', Object.keys(parsed), 'replies count:', parsed.replies?.length ?? 0);
 
     // Safety net: ensure analysis exists (prompt should provide it, but defend against AI non-compliance)
@@ -407,16 +479,15 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       };
     }
 
-    // Send structured events
+    // Send structured events — normal mode sends analysis/plan/replies; quick mode already sent reply_ready during streaming
     if (!isQuick) {
       if (parsed.analysis) send('analysis', parsed.analysis);
       if (parsed.plan) send('plan', parsed.plan);
+      send('replies', parsed.replies || []);
     }
 
     const maxTokens = 8000;
     const contextUsage = { estimatedTokens, maxTokens, percentage: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100) };
-
-    send('replies', parsed.replies || []);
 
     // Save to DB
     const roundId = uuid();
@@ -430,8 +501,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       const newRoundCount = session.round_count + 1;
       const newPlanGoal = parsed.plan?.goal || session.plan_goal;
       const newPlanNextStep = parsed.plan?.nextStep || session.plan_next_step;
-      db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ? WHERE id = ?')
-        .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, session.id);
+      // Quick mode: also save context_summary; normal mode: original SQL unchanged
+      if (isQuick) {
+        db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ?, context_summary = ? WHERE id = ?')
+          .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, quickCtx || session.context_summary, session.id);
+      } else {
+        db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ? WHERE id = ?')
+          .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, session.id);
+      }
     })();
 
     send('done', { contextUsage, roundId, version: 1 });
@@ -530,11 +607,13 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(session.target_id).reverse();
     const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(session.id);
 
-    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' };
-    const systemPrompt = isQuick ? buildQuickPrompt(promptParams) : buildSystemPrompt(promptParams);
+    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' } as any;
+    const systemPrompt = isQuick
+      ? buildQuickPrompt({ ...promptParams, contextSummary: session.context_summary || '' })
+      : buildSystemPrompt(promptParams);
     const conversationMessages: Array<{ role: string; content: string }> = [{ role: 'system', content: systemPrompt }];
     if (!isQuick) {
-      for (const aiMsg of aiMessages) { conversationMessages.push({ role: aiMsg.role, content: aiMsg.content }); }
+      for (const aiMsg of aiMessages as any[]) { conversationMessages.push({ role: aiMsg.role as string, content: aiMsg.content as string }); }
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${lastHerMsg.text}` });
 
@@ -552,6 +631,14 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       parsed = SAFE_FALLBACK;
     }
 
+    // Quick mode: normalize compact format
+    let quickCtx = '';
+    if (isQuick) {
+      const normalized = normalizeCompactResponse(parsed);
+      quickCtx = normalized.ctx || '';
+      parsed = normalized;
+    }
+
     // Safety net: ensure analysis exists
     if (!parsed.analysis) {
       parsed.analysis = {
@@ -566,8 +653,14 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 
     const totalText = conversationMessages.map(m => m.content).join('');
     const estimatedTokens = Math.ceil(totalText.length * 2);
-    db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ? WHERE id = ?')
-      .run(estimatedTokens, session.id);
+    // Quick mode: also save context_summary; normal mode: original SQL
+    if (isQuick) {
+      db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ?, context_summary = ? WHERE id = ?')
+        .run(estimatedTokens, quickCtx || session.context_summary, session.id);
+    } else {
+      db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ? WHERE id = ?')
+        .run(estimatedTokens, session.id);
+    }
 
     res.json({
       analysis: parsed.analysis,

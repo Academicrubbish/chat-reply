@@ -216,6 +216,7 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
           transition: 'all 0.2s',
           background: selected ? '#f0f5ff' : '#fff',
           boxShadow: selected ? '0 0 0 2px rgba(22,119,255,0.1)' : 'none',
+          animation: 'replyFadeIn 0.3s ease-out',
         }}
         onMouseEnter={e => { if (!selected) e.currentTarget.style.borderColor = '#3b5998'; }}
         onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = '#e8e8e8'; }}
@@ -584,3 +585,8 @@ const RoundTimeline = React.memo(function RoundTimeline({
 });
 
 export default RoundTimeline;
+
+// Progressive reply card fade-in animation
+const styleEl = document.createElement('style');
+styleEl.textContent = `@keyframes replyFadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`;
+document.head.appendChild(styleEl);
