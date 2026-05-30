@@ -360,10 +360,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!state.currentTargetId) return;
     // Cancel any previous in-flight request
     activeAbortRef.current?.abort();
-    dispatch({ type: 'TRIGGER_AI', mode: aiMode === 'quick' ? 'quick' : 'full' });
 
     const mode = aiMode === 'quick' ? 'quick' : 'full';
 
+    // Ensure session exists BEFORE dispatching TRIGGER_AI (UPDATE_SESSIONS resets phase)
     let sessionId = state.currentSessionId;
     if (!sessionId) {
       try {
@@ -376,6 +376,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
     }
+
+    dispatch({ type: 'TRIGGER_AI', mode });
     const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
 
     // 2s timeout: transition from 'analyze' to 'generating' if no delta yet
