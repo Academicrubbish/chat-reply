@@ -55,6 +55,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         generationStep: 'idle',
         streamingText: '',
         favorabilityHistory: [],
+        replyVersions: [],
+        activeVersionIndex: 0,
       };
     }
     case 'SEND_HER_MESSAGE':
@@ -179,7 +181,22 @@ function reducer(state: AppState, action: AppAction): AppState {
         activeVersionIndex: 0,
       };
     case 'UPDATE_SESSIONS':
-      return { ...state, sessions: action.sessions, currentSessionId: action.currentSessionId };
+      return {
+        ...state,
+        sessions: action.sessions,
+        currentSessionId: action.currentSessionId,
+        // Clear reply-related state on session switch to avoid stale cards
+        phase: 'idle',
+        generationStep: 'idle',
+        currentAnalysis: null,
+        currentReplies: null,
+        currentPlan: null,
+        contextUsage: null,
+        replyVersions: [],
+        activeVersionIndex: 0,
+        streamingText: '',
+        error: null,
+      };
     case 'SET_AI_MESSAGES':
       return { ...state, aiMessages: action.aiMessages };
     case 'SET_REPLY_SELECTIONS':
