@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useRef, useEffect, useState, type Dispatch, type ReactNode } from 'react';
-import type { AppState, AppAction, ChatMessage, ModelOption } from '../types';
+import type { AppState, AppAction, ChatMessage, ModelOption, GenerationStep } from '../types';
 import * as api from '../services/api';
 
 const STEP_ORDER: Record<string, number> = { idle: 0, analyze: 1, generating: 2, parsing: 3, done: 4 };
@@ -22,6 +22,15 @@ const initialState: AppState = {
   modalOpen: false,
   editingTarget: null,
   favorabilityHistory: [],
+  replyVersions: [],
+  activeVersionIndex: 0,
+  replySelections: [],
+  analysisDrawerOpen: false,
+  analysisResult: null,
+  analysisMode: null,
+  isAnalyzing: false,
+  analysisStep: 'idle' as const,
+  analysisHistory: [],
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -46,6 +55,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         generationStep: 'idle',
         streamingText: '',
         favorabilityHistory: [],
+        replyVersions: [],
+        activeVersionIndex: 0,
       };
     }
     case 'SEND_HER_MESSAGE':
@@ -56,9 +67,14 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: null,
       };
     case 'TRIGGER_AI':
-      return { ...state, phase: 'generating', generationStep: 'analyze', streamingText: '', error: null };
+      return {
+        ...state,
+        phase: 'generating',
+        generationStep: action.mode === 'quick' ? 'generating' : 'analyze',
+        streamingText: '', error: null, replyVersions: [], activeVersionIndex: 0,
+      };
     case 'GENERATE_SUCCESS': {
-      const { analysis, plan, contextUsage, replies } = action.data;
+      const { analysis, plan, contextUsage, replies, roundId } = action.data;
       const newHistory = analysis
         ? [...state.favorabilityHistory, {
             value: analysis.favorability,
@@ -66,6 +82,10 @@ function reducer(state: AppState, action: AppAction): AppState {
             round: state.favorabilityHistory.length + 1,
           }]
         : state.favorabilityHistory;
+      const newVersion = { analysis, replies, roundId };
+      const versions = state.replyVersions.length > 0
+        ? [...state.replyVersions, newVersion]
+        : [newVersion];
       return {
         ...state,
         phase: 'waiting_select',
@@ -76,10 +96,12 @@ function reducer(state: AppState, action: AppAction): AppState {
         contextUsage,
         error: null,
         favorabilityHistory: newHistory,
+        replyVersions: versions,
+        activeVersionIndex: versions.length - 1,
       };
     }
     case 'GENERATE_FAILURE':
-      return { ...state, phase: 'idle', generationStep: 'idle', streamingText: '', error: action.error };
+      return { ...state, phase: 'waiting_select', generationStep: 'idle', streamingText: '', error: action.error };
     case 'STREAM_ANALYSIS': {
       const newHistory = [...state.favorabilityHistory, {
         value: action.analysis.favorability,
@@ -99,10 +121,50 @@ function reducer(state: AppState, action: AppAction): AppState {
         streamingText: state.streamingText + action.text,
       };
     }
-    case 'STREAM_REPLIES':
-      return { ...state, phase: 'waiting_select', generationStep: 'done', currentReplies: action.replies, streamingText: '', error: null };
-    case 'STREAM_DONE':
-      return { ...state, phase: 'waiting_select', generationStep: 'done', contextUsage: action.contextUsage };
+    case 'STREAM_REPLIES': {
+      const newVersion = { analysis: state.currentAnalysis, replies: action.replies };
+      const versions = state.replyVersions.length > 0
+        ? [...state.replyVersions, newVersion]
+        : [newVersion];
+      return {
+        ...state,
+        phase: 'waiting_select',
+        generationStep: 'done',
+        currentReplies: action.replies,
+        streamingText: '',
+        error: null,
+        replyVersions: versions,
+        activeVersionIndex: versions.length - 1,
+      };
+    }
+    case 'STREAM_REPLY_READY': {
+      // Progressive: add individual reply as it arrives (quick mode only)
+      const current = state.currentReplies || [];
+      if (current.some(r => r.id === action.reply.id)) return state;
+      const updated = [...current, action.reply];
+      return {
+        ...state,
+        phase: 'waiting_select',
+        currentReplies: updated,
+        streamingText: '',
+        replyVersions: state.replyVersions.length > 0
+          ? state.replyVersions.map((v, i) =>
+              i === state.replyVersions.length - 1 ? { ...v, replies: updated } : v)
+          : [{ analysis: state.currentAnalysis, replies: updated }],
+        activeVersionIndex: Math.max(0, state.replyVersions.length - 1),
+      };
+    }
+    case 'STREAM_DONE': {
+      // Attach roundId to the latest replyVersion if available
+      const versions = state.replyVersions.length > 0
+        ? state.replyVersions.map((v, i) =>
+            i === state.replyVersions.length - 1 && action.roundId
+              ? { ...v, roundId: action.roundId }
+              : v
+          )
+        : state.replyVersions;
+      return { ...state, phase: 'waiting_select', generationStep: 'done', contextUsage: action.contextUsage, replyVersions: versions };
+    }
     case 'SET_GENERATION_STEP':
       return { ...state, generationStep: action.step };
     case 'SELECT_REPLY':
@@ -115,11 +177,34 @@ function reducer(state: AppState, action: AppAction): AppState {
         currentAnalysis: null,
         currentReplies: null,
         error: null,
+        replyVersions: [],
+        activeVersionIndex: 0,
       };
-    case 'UPDATE_SESSIONS':
-      return { ...state, sessions: action.sessions, currentSessionId: action.currentSessionId };
+    case 'UPDATE_SESSIONS': {
+      // Only clear reply state when session actually changes (switching), not on refresh
+      const sessionChanged = action.currentSessionId !== state.currentSessionId;
+      return {
+        ...state,
+        sessions: action.sessions,
+        currentSessionId: action.currentSessionId,
+        ...(sessionChanged ? {
+          phase: 'idle',
+          generationStep: 'idle',
+          currentAnalysis: null,
+          currentReplies: null,
+          currentPlan: null,
+          contextUsage: null,
+          replyVersions: [],
+          activeVersionIndex: 0,
+          streamingText: '',
+          error: null,
+        } : {}),
+      };
+    }
     case 'SET_AI_MESSAGES':
       return { ...state, aiMessages: action.aiMessages };
+    case 'SET_REPLY_SELECTIONS':
+      return { ...state, replySelections: action.selections };
     case 'SET_PLAN':
       return { ...state, currentPlan: action.plan };
     case 'SET_ERROR':
@@ -145,6 +230,56 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         messages: state.messages.filter(m => m.id !== action.id),
       };
+    case 'TRIGGER_REGENERATE':
+      return {
+        ...state,
+        phase: 'generating',
+        generationStep: 'analyze',
+        streamingText: '',
+        error: null,
+      };
+    case 'SWITCH_VERSION': {
+      const v = state.replyVersions[action.index];
+      if (!v) return state;
+      return {
+        ...state,
+        activeVersionIndex: action.index,
+        currentAnalysis: v.analysis,
+        currentReplies: v.replies,
+      };
+    }
+    case 'ADVANCE_REGEN_STEP': {
+      const order: Record<string, GenerationStep> = { analyze: 'generating', generating: 'parsing', parsing: 'parsing' };
+      const next = order[state.generationStep];
+      return next ? { ...state, generationStep: next } : state;
+    }
+    case 'TRIGGER_ANALYSIS':
+      return {
+        ...state,
+        analysisDrawerOpen: false,
+        analysisMode: action.analysisMode,
+        analysisResult: null,
+        isAnalyzing: true,
+        analysisStep: 'analyzing' as const,
+        streamingText: '',
+        error: null,
+      };
+    case 'ANALYSIS_SUCCESS':
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisDrawerOpen: true };
+    case 'ANALYSIS_FAILURE':
+      return { ...state, isAnalyzing: false, analysisStep: 'idle' as const, error: action.error };
+    case 'CLOSE_ANALYSIS_DRAWER':
+      return { ...state, analysisDrawerOpen: false };
+    case 'OPEN_ANALYSIS_DRAWER':
+      return { ...state, analysisDrawerOpen: true, analysisResult: null, analysisMode: null };
+    case 'ANALYSIS_STEP':
+      return { ...state, analysisStep: action.step };
+    case 'ANALYSIS_DELTA':
+      return { ...state, streamingText: state.streamingText + action.text };
+    case 'SET_ANALYSIS_HISTORY':
+      return { ...state, analysisHistory: action.history };
+    case 'VIEW_HISTORY_ANALYSIS':
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, analysisDrawerOpen: true };
     default:
       return state;
   }
@@ -153,10 +288,15 @@ function reducer(state: AppState, action: AppAction): AppState {
 async function loadSessionAiMessages(sessionId: string, dispatch: Dispatch<AppAction>) {
   if (!sessionId) return;
   try {
-    const aiMessages = await api.getSessionMessages(sessionId);
+    const [aiMessages, selections] = await Promise.all([
+      api.getSessionMessages(sessionId),
+      api.getReplySelections(sessionId),
+    ]);
     dispatch({ type: 'SET_AI_MESSAGES', aiMessages });
+    dispatch({ type: 'SET_REPLY_SELECTIONS', selections });
   } catch {
     dispatch({ type: 'SET_AI_MESSAGES', aiMessages: [] });
+    dispatch({ type: 'SET_REPLY_SELECTIONS', selections: [] });
   }
 }
 
@@ -166,7 +306,7 @@ interface AppContextValue {
   selectTarget: (id: string) => Promise<void>;
   sendHerMessage: (text: string) => void;
   triggerAI: () => Promise<void>;
-  selectReplyAction: (reply: { id: number; text: string; strategy: string }) => Promise<void>;
+  selectReplyAction: (reply: { id: number; text: string; strategy: string }, aiMessageId?: string) => Promise<void>;
   sendCustomReply: (text: string) => Promise<void>;
   createNewSession: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
@@ -174,6 +314,9 @@ interface AppContextValue {
   models: ModelOption[];
   selectedProvider: string;
   setSelectedProvider: (provider: string) => void;
+  aiMode: 'full' | 'quick' | 'advisor' | 'review';
+  setAiMode: (mode: 'full' | 'quick' | 'advisor' | 'review') => void;
+  triggerAnalysis: (mode: 'advisor' | 'review') => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -183,6 +326,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeAbortRef = useRef<AbortController | null>(null);
   const [selectedProvider, setSelectedProvider] = useState('mimo');
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [aiMode, setAiMode] = useState<'full' | 'quick' | 'advisor' | 'review'>('full');
 
   useEffect(() => {
     api.getModels().then(({ models }) => setModels(models)).catch(() => {});
@@ -204,6 +348,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (activeSession) {
       await loadSessionAiMessages(activeSession.id, dispatch);
     }
+    // Load analysis history for this target
+    api.getAnalyses(id).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
   };
 
   const sendHerMessage = (text: string) => {
@@ -221,8 +367,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!state.currentTargetId) return;
     // Cancel any previous in-flight request
     activeAbortRef.current?.abort();
-    dispatch({ type: 'TRIGGER_AI' });
 
+    const mode = aiMode === 'quick' ? 'quick' : 'full';
+
+    // Ensure session exists BEFORE dispatching TRIGGER_AI (UPDATE_SESSIONS resets phase)
     let sessionId = state.currentSessionId;
     if (!sessionId) {
       try {
@@ -235,6 +383,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
     }
+
+    dispatch({ type: 'TRIGGER_AI', mode });
     const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
 
     // 2s timeout: transition from 'analyze' to 'generating' if no delta yet
@@ -278,10 +428,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           case 'replies':
             dispatch({ type: 'STREAM_REPLIES', replies: evt.data });
             break;
+          case 'reply_ready':
+            dispatch({ type: 'STREAM_REPLY_READY', reply: evt.data.reply, index: evt.data.index });
+            break;
           case 'done':
             clearTimeout(analyzeTimer);
             if (heartbeatTimer) clearTimeout(heartbeatTimer);
-            dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage });
+            dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
             loadSessionAiMessages(sessionId, dispatch);
             // Refresh sessions to update context_tokens in SessionBar
             if (state.currentTargetId) {
@@ -300,26 +453,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (err) => {
         clearTimeout(analyzeTimer);
         if (heartbeatTimer) clearTimeout(heartbeatTimer);
-        // Don't show error for intentional aborts (target switch, new request)
         if (err.name !== 'AbortError') {
           dispatch({ type: 'GENERATE_FAILURE', error: err.message });
+        }
+      },
+      mode,
+    );
+    activeAbortRef.current = ctrl;
+  };
+
+  const triggerAnalysis = async (mode: 'advisor' | 'review') => {
+    if (!state.currentTargetId) return;
+    activeAbortRef.current?.abort();
+
+    // Ensure session exists BEFORE dispatching TRIGGER_ANALYSIS (UPDATE_SESSIONS resets state)
+    let sessionId = state.currentSessionId;
+    if (!sessionId) {
+      try {
+        const session = await api.createSession(state.currentTargetId);
+        sessionId = session.id;
+        dispatch({ type: 'UPDATE_SESSIONS', sessions: await api.getSessions(state.currentTargetId), currentSessionId: sessionId });
+      } catch { return; }
+    }
+    dispatch({ type: 'TRIGGER_ANALYSIS', analysisMode: mode });
+
+    const ctrl = api.analyzeStream(
+      sessionId, mode, selectedProvider,
+      (evt) => {
+        if (evt.event === 'step') {
+          dispatch({ type: 'ANALYSIS_STEP', step: evt.data.step });
+        } else if (evt.event === 'delta') {
+          dispatch({ type: 'ANALYSIS_DELTA', text: evt.data.text });
+        } else if (evt.event === 'analysis_done') {
+          dispatch({ type: 'ANALYSIS_SUCCESS', analysisMode: mode, data: evt.data.result });
+          dispatch({ type: 'ANALYSIS_STEP', step: 'done' });
+          // Refresh history after successful analysis
+          if (state.currentTargetId) {
+            api.getAnalyses(state.currentTargetId).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
+          }
+        }
+      },
+      (err) => {
+        if (err.name !== 'AbortError') {
+          dispatch({ type: 'ANALYSIS_FAILURE', error: err.message });
         }
       },
     );
     activeAbortRef.current = ctrl;
   };
 
-  const selectReplyAction = async (reply: { id: number; text: string; strategy: string }) => {
+  const selectReplyAction = async (reply: { id: number; text: string; strategy: string }, aiMessageId?: string) => {
     if (!state.currentSessionId || !state.currentTargetId) return;
     try {
-      await api.selectReply(state.currentSessionId, reply.id);
+      const result = await api.selectReply(state.currentSessionId, reply.id, aiMessageId);
       const msg: ChatMessage = {
-        id: '', target_id: state.currentTargetId, role: 'me',
+        id: result.messageId || '', target_id: state.currentTargetId, role: 'me',
         text: reply.text, source: 'AI建议', strategy: reply.strategy,
         session_id: state.currentSessionId, created_at: Date.now(),
       };
       dispatch({ type: 'SELECT_REPLY', message: msg });
-      // Refresh aiMessages to include the new round
+      // Refresh aiMessages and selections
       await loadSessionAiMessages(state.currentSessionId, dispatch);
     } catch (err: any) {
       dispatch({ type: 'SET_ERROR', error: err.message });
@@ -329,9 +522,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sendCustomReply = async (text: string) => {
     if (!state.currentSessionId || !state.currentTargetId) return;
     try {
-      await api.customReply(state.currentSessionId, text);
+      const result = await api.customReply(state.currentSessionId, text);
       const msg: ChatMessage = {
-        id: '', target_id: state.currentTargetId, role: 'me',
+        id: result.messageId || '', target_id: state.currentTargetId, role: 'me',
         text, source: '自定义回复', strategy: null,
         session_id: state.currentSessionId, created_at: Date.now(),
       };
@@ -351,6 +544,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const switchSession = async (sessionId: string) => {
+    activeAbortRef.current?.abort();
     dispatch({ type: 'UPDATE_SESSIONS', sessions: state.sessions, currentSessionId: sessionId });
     await loadSessionAiMessages(sessionId, dispatch);
   };
@@ -373,6 +567,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, dispatch, selectTarget, sendHerMessage, triggerAI,
       selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
       models, selectedProvider, setSelectedProvider,
+      aiMode, setAiMode, triggerAnalysis,
     }}>
       {children}
     </AppContext.Provider>

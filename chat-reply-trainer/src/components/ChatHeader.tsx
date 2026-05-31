@@ -1,34 +1,37 @@
 import React from 'react';
-import { Avatar, Badge, Button, Space, Popconfirm } from 'antd';
-import { RobotOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Avatar, Button, Popconfirm, Segmented } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import type { AiMode } from '../types';
 
 interface ChatHeaderProps {
   targetName: string;
-  onAIAssist: () => void;
   onReset: () => void;
-  isGenerating: boolean;
+  aiMode: AiMode;
+  onAiModeChange: (mode: AiMode) => void;
 }
 
-const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset, isGenerating }) => {
+const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onReset, aiMode, onAiModeChange }) => {
+  const isQuick = aiMode === 'quick';
   return (
-    <div style={{ background: '#fff', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-      <Space>
-        <Avatar size={34} style={{ backgroundColor: '#f48fb1', borderRadius: 6 }}>
-          {targetName.charAt(0)}
-        </Avatar>
-        <span style={{ fontSize: 14, fontWeight: 500 }}>{targetName}</span>
-        <Badge status="success" />
-      </Space>
-      <Space>
-        <Button
-          data-tour-id="ai-assist-btn"
-          type="primary"
-          icon={<RobotOutlined />}
-          onClick={onAIAssist}
-          loading={isGenerating}
-        >
-          {isGenerating ? '分析中...' : 'AI 辅助'}
-        </Button>
+    <div style={{
+      height: 52, background: '#fff', borderBottom: '1px solid #ebeef5',
+      display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10, flexShrink: 0,
+    }}>
+      <Avatar size={32} style={{ backgroundColor: '#f48fb1', borderRadius: 7, flexShrink: 0 }}>
+        {targetName.charAt(0)}
+      </Avatar>
+      <span style={{ fontSize: 14, fontWeight: 600 }}>{targetName}</span>
+      <span style={{ width: 6, height: 6, background: '#52c41a', borderRadius: '50%', flexShrink: 0 }} />
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Segmented
+          size="small"
+          value={isQuick ? 'quick' : 'full'}
+          onChange={(val) => onAiModeChange(val as AiMode)}
+          options={[
+            { label: '完整', value: 'full' },
+            { label: '快速', value: 'quick' },
+          ]}
+        />
         <Popconfirm
           title="确定清空所有聊天记录？"
           description="此操作不可恢复"
@@ -37,11 +40,9 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onAIAssist, onReset
           cancelText="取消"
           okButtonProps={{ danger: true }}
         >
-          <Button size="small" icon={<ReloadOutlined />}>
-            重新开始
-          </Button>
+          <Button size="small" type="text" icon={<ReloadOutlined />} style={{ color: '#999' }} />
         </Popconfirm>
-      </Space>
+      </div>
     </div>
   );
 };

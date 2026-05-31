@@ -7,6 +7,11 @@
   --color-bg: #f7f8fa;
   --color-chat-bg: #ededed;
   --color-border: #e8e8e8;
+  --color-pink-avatar: #f48fb1;
+  --color-green-avatar: #66bb6a;
+  --color-success: #52c41a;
+  --color-warning: #fa8c16;
+  --color-danger: #f5222d;
   --animate-slide-up: slide-up 0.3s ease;
 }
 
@@ -18,6 +23,15 @@
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
+}
+
+@keyframes replyFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.reply-card:not(.reply-card-selected):hover {
+  border-color: #3b5998;
 }
 
 body {

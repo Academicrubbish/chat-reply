@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>聊天模拟器 — UI 重设计 Mockup</title>
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #3b5998;
+      --primary-light: #e8f0fe;
+      --primary-dark: #2d4373;
+      --wechat-green: #95ec69;
+      --pink-avatar: #f48fb1;
+      --green-avatar: #66bb6a;
+      --bg-page: #f5f6fa;
+      --bg-white: #ffffff;
+      --border: #e8ecf1;
+      --text-primary: #1a1a2e;
+      --text-secondary: #6b7280;
+      --text-muted: #9ca3af;
+      --success: #52c41a;
+      --warning: #fa8c16;
+      --danger: #f5222d;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+      --transition: 0.2s ease;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      background: var(--bg-page);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ===== Top Bar ===== */
+    .top-bar {
+      height: 52px;
+      background: var(--bg-white);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .top-bar-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .top-bar-logo-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--primary), #5b7bd5);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .top-bar-logo-text {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .top-bar-sep {
+      width: 1px;
+      height: 24px;
+      background: var(--border);
+    }
+    .top-bar-target {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background var(--transition);
+    }
+    .top-bar-target:hover { background: var(--primary-light); }
+    .top-bar-target-avatar {
+      width: 26px;
+      height: 26px;
+      background: var(--pink-avatar);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .top-bar-target-name {
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .top-bar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .top-bar-logout {
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      border: none;
+      background: none;
+      transition: all var(--transition);
+    }
+    .top-bar-logout:hover { color: var(--danger); background: #fff1f0; }
+
+    /* ===== Main Layout ===== */
+    .main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ===== Left Panel (AI Console) ===== */
+    .left-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      border-right: 1px solid var(--border);
+      background: var(--bg-white);
+    }
+
+    /* -- Toolbar (merged PersonCard + SessionBar) -- */
+    .toolbar {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .toolbar-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .toolbar-person {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    .toolbar-avatar {
+      width: 36px;
+      height: 36px;
+      background: var(--pink-avatar);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .toolbar-person-info {
+      min-width: 0;
+    }
+    .toolbar-person-name {
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toolbar-person-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .toolbar-person-meta .dot {
+      width: 4px;
+      height: 4px;
+      background: var(--success);
+      border-radius: 50%;
+    }
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    /* -- Session Row -- */
+    .session-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .session-badge {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
+      background: var(--primary-light);
+      padding: 2px 10px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+    .session-rounds {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .context-bar {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .context-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .context-progress {
+      flex: 1;
+      height: 4px;
+      background: #f0f0f0;
+      border-radius: 2px;
+      overflow: hidden;
+      max-width: 80px;
+    }
+    .context-progress-fill {
+      height: 100%;
+      background: var(--success);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .context-percent {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .session-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+    }
+
+    /* -- Analysis Toolbar -- */
+    .analysis-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .analysis-toolbar-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      margin-right: 2px;
+    }
+
+    /* ===== Buttons ===== */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 12px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--bg-white);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-icon {
+      padding: 5px 7px;
+      min-width: 30px;
+      justify-content: center;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); color: white; }
+    .btn-ghost {
+      border: none;
+      background: none;
+      color: var(--text-secondary);
+    }
+    .btn-ghost:hover { background: var(--primary-light); color: var(--primary); }
+    .btn-danger-ghost {
+      border: none;
+      background: none;
+      color: var(--text-muted);
+    }
+    .btn-danger-ghost:hover { color: var(--danger); background: #fff1f0; }
+    .btn-sm { padding: 3px 8px; font-size: 11px; }
+
+    /* ===== Tabs (Segmented) ===== */
+    .segmented {
+      display: inline-flex;
+      background: #f3f4f6;
+      border-radius: 7px;
+      padding: 2px;
+    }
+    .segmented-item {
+      padding: 3px 12px;
+      font-size: 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: all var(--transition);
+      font-weight: 500;
+    }
+    .segmented-item:hover { color: var(--text-primary); }
+    .segmented-item.active {
+      background: var(--bg-white);
+      color: var(--text-primary);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    /* ===== Round Timeline (AI Console content) ===== */
+    .timeline {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+    .timeline-section {
+      margin-bottom: 16px;
+    }
+    .timeline-section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .timeline-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .tag-green { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+    .tag-blue { background: #e6f7ff; color: #1677ff; border: 1px solid #91d5ff; }
+    .tag-orange { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
+    .tag-red { background: #fff1f0; color: #f5222d; border: 1px solid #ffa39e; }
+    .tag-purple { background: #f9f0ff; color: #722ed1; border: 1px solid #d3adf7; }
+
+    /* -- Analysis Card -- */
+    .analysis-card {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      border-left: 3px solid var(--primary);
+      margin-bottom: 12px;
+    }
+    .analysis-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .analysis-card-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+    .analysis-card-emotions {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .fav-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: auto;
+    }
+    .fav-high { background: #f6ffed; color: #52c41a; }
+    .fav-mid { background: #fff7e6; color: #fa8c16; }
+    .fav-low { background: #fff1f0; color: #f5222d; }
+
+    /* -- Reply Cards -- */
+    .reply-card {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .reply-card:hover {
+      border-color: var(--primary);
+      box-shadow: 0 2px 8px rgba(59,89,152,0.1);
+    }
+    .reply-card.selected {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+    .reply-card-tag {
+      margin-bottom: 4px;
+    }
+    .reply-card-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+    .reply-card-reason {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .reply-card-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .feedback-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: none;
+      background: none;
+      transition: all var(--transition);
+    }
+    .feedback-btn:hover { color: var(--primary); background: var(--primary-light); }
+    .feedback-btn.active-up { color: var(--success); background: #f6ffed; }
+    .feedback-btn.active-down { color: var(--danger); background: #fff1f0; }
+
+    /* -- Action Row -- */
+    .action-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .custom-reply-area {
+      margin-top: 10px;
+    }
+    .custom-reply-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: 12px;
+      resize: none;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    .custom-reply-input:focus { border-color: var(--primary); }
+
+    /* ===== Right Panel (Chat) ===== */
+    .right-panel {
+      width: 360px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-page);
+      flex-shrink: 0;
+    }
+
+    /* -- Chat Header -- */
+    .chat-header {
+      height: 52px;
+      background: var(--bg-white);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .chat-header-avatar {
+      width: 32px;
+      height: 32px;
+      background: var(--pink-avatar);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .chat-header-name {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .chat-header-status {
+      width: 6px;
+      height: 6px;
+      background: var(--success);
+      border-radius: 50%;
+    }
+    .chat-header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* -- Chat History -- */
+    .chat-history {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bubble {
+      max-width: 80%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-word;
+      position: relative;
+    }
+    .bubble-her {
+      align-self: flex-start;
+      background: var(--bg-white);
+      border: 1px solid #eee;
+      border-bottom-left-radius: 4px;
+    }
+    .bubble-me {
+      align-self: flex-end;
+      background: var(--wechat-green);
+      border-bottom-right-radius: 4px;
+    }
+    .bubble-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .bubble-me .bubble-meta { text-align: right; }
+
+    /* -- Message Input -- */
+    .msg-input-area {
+      padding: 10px 16px;
+      background: var(--bg-white);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .msg-input-wrapper {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      background: #f7f7f7;
+      border-radius: 10px;
+      padding: 8px 12px;
+    }
+    .msg-input {
+      flex: 1;
+      border: none;
+      background: none;
+      font-size: 13px;
+      resize: none;
+      outline: none;
+      min-height: 20px;
+      max-height: 80px;
+      line-height: 1.5;
+      font-family: inherit;
+    }
+    .msg-send-btn {
+      width: 32px;
+      height: 32px;
+      background: var(--primary);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background var(--transition);
+    }
+    .msg-send-btn:hover { background: var(--primary-dark); }
+
+    /* ===== Step Chain (inline) ===== */
+    .step-chain {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 16px;
+    }
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .step-icon-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 32px;
+    }
+    .step-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-icon.done { background: var(--success); color: white; }
+    .step-icon.active { background: var(--primary); color: white; animation: pulse 1.2s infinite; }
+    .step-icon.pending { border: 2px solid #d9d9d9; background: white; }
+    .step-line {
+      width: 2px;
+      flex: 1;
+      min-height: 10px;
+      margin-top: 3px;
+    }
+    .step-line.done { background: var(--success); }
+    .step-line.pending { background: #f0f0f0; }
+    .step-label {
+      font-size: 12px;
+      line-height: 18px;
+      white-space: nowrap;
+    }
+    .step-label.done { color: var(--success); }
+    .step-label.active { color: var(--primary); font-weight: 600; }
+    .step-label.pending { color: var(--text-muted); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    /* ===== Scrollbar ===== */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d9d9d9; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #bbb; }
+
+    /* ===== SVG Icons (inline) ===== */
+    .icon {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+    .icon-sm { width: 14px; height: 14px; }
+    .icon-lg { width: 18px; height: 18px; }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 768px) {
+      .right-panel { width: 100%; }
+      .left-panel { display: none; }
+      .main.mobile-chat .left-panel { display: flex; }
+      .main.mobile-chat .right-panel { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Top Bar ===== -->
+  <header class="top-bar">
+    <div class="top-bar-logo">
+      <div class="top-bar-logo-icon">聊</div>
+      <span class="top-bar-logo-text">聊天模拟器</span>
+    </div>
+    <div class="top-bar-sep"></div>
+    <div class="top-bar-target">
+      <div class="top-bar-target-avatar">林</div>
+      <span class="top-bar-target-name">林小雨</span>
+      <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+    </div>
+    <div class="top-bar-right">
+      <button class="top-bar-logout">退出</button>
+    </div>
+  </header>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+
+    <!-- ===== Left Panel: AI Console ===== -->
+    <section class="left-panel">
+
+      <!-- Toolbar: Person + Session + Analysis -->
+      <div class="toolbar">
+        <!-- Row 1: Person Info + Actions -->
+        <div class="toolbar-top">
+          <div class="toolbar-person">
+            <div class="toolbar-avatar">林</div>
+            <div class="toolbar-person-info">
+              <div class="toolbar-person-name">林小雨</div>
+              <div class="toolbar-person-meta">
+                <span class="dot"></span>
+                <span>在线</span>
+                <span style="color:#d9d9d9">·</span>
+                <span>暧昧期</span>
+              </div>
+            </div>
+          </div>
+          <div class="toolbar-actions">
+            <button class="btn btn-primary" style="gap:5px">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 2a4 4 0 0 1 4 4v1a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4zM19 21v-1a6 6 0 0 0-6-6H9a6 6 0 0 0-6 6v1"/></svg>
+              AI 辅助
+            </button>
+          </div>
+        </div>
+
+        <!-- Row 2: Session + Context + Tools -->
+        <div class="session-row">
+          <span class="session-badge">窗口 #1</span>
+          <span class="session-rounds">8 轮对话</span>
+          <div class="context-bar">
+            <span class="context-label">上下文</span>
+            <div class="context-progress">
+              <div class="context-progress-fill" style="width:35%"></div>
+            </div>
+            <span class="context-percent">35%</span>
+          </div>
+          <div class="analysis-toolbar">
+            <button class="btn btn-sm" title="军师分析">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              军师
+            </button>
+            <button class="btn btn-sm" title="复盘总结">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+              复盘
+            </button>
+            <button class="btn btn-sm btn-icon btn-ghost" title="历史记录">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            </button>
+          </div>
+          <div class="session-actions">
+            <select style="font-size:11px;border:1px solid var(--border);border-radius:6px;padding:3px 8px;background:white;color:var(--text-secondary);outline:none;cursor:pointer;max-width:100px;">
+              <option>窗口 1</option>
+              <option>窗口 2</option>
+            </select>
+            <button class="btn btn-sm btn-ghost">新窗口</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timeline Content -->
+      <div class="timeline">
+
+        <!-- Analysis Card -->
+        <div class="analysis-card">
+          <div class="analysis-card-header">
+            <span class="tag tag-green">聊天升温</span>
+            <span class="tag tag-blue">正面无冲突</span>
+            <span class="tag tag-orange">魔趣法则</span>
+            <span class="fav-badge fav-high">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              72
+            </span>
+          </div>
+          <div class="analysis-card-text">
+            对方主动分享了周末去咖啡店的照片，语气轻松愉快，用了emoji表情，有明显的分享欲。
+          </div>
+          <div class="analysis-card-emotions">
+            <span class="tag tag-blue">开心</span>
+            <span class="tag tag-purple">期待</span>
+          </div>
+        </div>
+
+        <!-- Reply Cards -->
+        <div class="timeline-section">
+          <div class="timeline-section-header">
+            <span class="timeline-section-title">回复建议</span>
+            <span style="font-size:11px;color:var(--text-muted)">点击选择发送</span>
+          </div>
+
+          <div class="reply-card selected">
+            <span class="tag tag-orange reply-card-tag">魔趣法则</span>
+            <div class="reply-card-text">这家店我之前路过，门口那只猫好像是老板养的，每次路过都在晒太阳，下次我带你去撸猫</div>
+            <div class="reply-card-reason">制造共同体验的画面感，暗示线下邀约</div>
+            <div class="reply-card-actions">
+              <button class="feedback-btn active-up">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                赞
+              </button>
+              <button class="feedback-btn">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
+                踩
+              </button>
+              <span style="font-size:11px;color:var(--success);font-weight:500;margin-left:auto">✓ 已选择</span>
+            </div>
+          </div>
+
+          <div class="reply-card">
+            <span class="tag tag-green reply-card-tag">平衡艺术</span>
+            <div class="reply-card-text">哇拍得好好看！你是不是偷偷学过摄影啊，这构图绝了</div>
+            <div class="reply-card-reason">先赞美再轻松反转，制造互动话题</div>
+            <div class="reply-card-actions">
+              <button class="feedback-btn">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                赞
+              </button>
+              <button class="feedback-btn">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
+                踩
+              </button>
+            </div>
+          </div>
+
+          <div class="reply-card">
+            <span class="tag tag-blue reply-card-tag">安全回复</span>
+            <div class="reply-card-text">看起来不错诶，那个拿铁拉花好好看</div>
+            <div class="reply-card-reason">稳妥不出错，适合当下的轻松氛围</div>
+            <div class="reply-card-actions">
+              <button class="feedback-btn">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                赞
+              </button>
+              <button class="feedback-btn">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
+                踩
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Row -->
+        <div class="action-row">
+          <button class="btn btn-sm btn-ghost">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M2.5 22v-6h6"/><path d="M2.5 11.5a10 10 0 0 1 18.8-4.3M21.5 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+            重新生成
+          </button>
+        </div>
+
+        <!-- Custom Reply -->
+        <div class="custom-reply-area">
+          <textarea class="custom-reply-input" rows="2" placeholder="输入自定义回复..."></textarea>
+        </div>
+
+        <!-- Historical Round (collapsed) -->
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+          <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 0;color:var(--text-secondary);font-size:12px;">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+            <span style="font-weight:600;color:var(--text-muted)">Round #1</span>
+            <span class="tag tag-orange">释放性信息</span>
+            <span class="tag tag-blue">正面冲突</span>
+            <span class="fav-badge fav-mid" style="font-size:11px;padding:1px 6px;">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              55
+            </span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ===== Right Panel: Chat Simulator ===== -->
+    <section class="right-panel">
+
+      <!-- Chat Header -->
+      <div class="chat-header">
+        <div class="chat-header-avatar">林</div>
+        <span class="chat-header-name">林小雨</span>
+        <span class="chat-header-status"></span>
+        <div class="chat-header-right">
+          <div class="segmented">
+            <span class="segmented-item active">完整</span>
+            <span class="segmented-item">快速</span>
+          </div>
+          <button class="btn btn-sm btn-danger-ghost" title="重新开始">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M2.5 22v-6h6"/><path d="M2.5 11.5a10 10 0 0 1 18.8-4.3M21.5 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Chat History -->
+      <div class="chat-history">
+        <div class="bubble bubble-her">
+          <div>最近在忙什么呀</div>
+          <div class="bubble-meta">林小雨 · 10:30</div>
+        </div>
+        <div class="bubble bubble-me">
+          <div>刚下班，在找好吃的，你呢？</div>
+          <div class="bubble-meta">我 · 10:32</div>
+        </div>
+        <div class="bubble bubble-her">
+          <div>我在一家新开的咖啡店，环境超好的！</div>
+          <div class="bubble-meta">林小雨 · 10:35</div>
+        </div>
+        <div class="bubble bubble-her">
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <div style="width:200px;height:140px;background:#f0f0f0;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:11px;">📷 照片</div>
+          </div>
+          <div class="bubble-meta">林小雨 · 10:35</div>
+        </div>
+        <div class="bubble bubble-her">
+          <div>他们家的拿铁拉花超好看，下次带你来 ☕</div>
+          <div class="bubble-meta">林小雨 · 10:36</div>
+        </div>
+      </div>
+
+      <!-- Message Input -->
+      <div class="msg-input-area">
+        <div class="msg-input-wrapper">
+          <textarea class="msg-input" rows="1" placeholder="输入对方消息..." style="flex:1"></textarea>
+          <button class="msg-send-btn">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+</body>
+</html>

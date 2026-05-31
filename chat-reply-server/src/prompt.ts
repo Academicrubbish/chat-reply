@@ -15,6 +15,7 @@ interface PromptParams {
   planGoal: string;
   planNextStep: string;
   feedbackPreferences: string;
+  contextSummary?: string;
 }
 
 export function buildSystemPrompt(params: PromptParams): string {
@@ -113,4 +114,154 @@ ${chatHistory || '（暂无聊天记录）'}
 - plan字段根据当前对话进展给出或更新策略目标
 - favorabilityReason必须给出具体依据，结合对方语气、回复频率、内容态度等分析
 - 只返回JSON，不要返回其他内容`;
+}
+
+export function buildQuickPrompt(params: PromptParams): string {
+  const { target, recentMessages, feedbackPreferences, contextSummary } = params;
+
+  const toneMap: Record<string, string> = {
+    aggressive: '大胆推进',
+    moderate: '温和适中',
+    conservative: '稳扎稳打',
+  };
+
+  const chatHistory = recentMessages.slice(-4).map(m => {
+    if (m.role === 'scene') return `【场景】${m.text}`;
+    return `${m.role === 'her' ? '对方' : '我'}：${m.text}`;
+  }).join('\n');
+
+  return `你是社交聊天辅导AI。根据对方最新消息，快速生成3条风格各异的回复。
+
+## 策略库
+- 扩大冲突：调侃升级，用反问/夸张回应挑衅
+- 魔趣法则：有趣的夸张画面，制造好奇心
+- 平衡艺术：赞美+轻松转折，化解严肃感
+- 释放性信息：恰到好处地表露兴趣
+- 安全回复：稳妥不出错
+
+## 对方信息
+名字：${target.name}
+语气风格：${toneMap[target.tone_level] || '温和适中'}${target.forbidden_topics ? `\n话题禁区：${target.forbidden_topics}` : ''}
+
+${contextSummary ? `## 对话摘要\n${contextSummary}\n` : ''}${feedbackPreferences ? `## 用户偏好\n${feedbackPreferences}\n` : ''}
+## 最近聊天
+${chatHistory || '（暂无）'}
+
+## 输出要求
+严格返回以下格式的JSON（用短键名，不要多余字段）：
+{"signal":"信号类型","fav":0-100,"ctx":"50字以内的对话摘要，概括关系阶段、对方态度、近期话题，供下次快速回忆","replies":[{"s":"策略名","t":"回复文本"},{"s":"策略名","t":"回复文本"},{"s":"策略名","t":"回复文本"}]}
+
+要求：
+- signal 可选值：正面冲突、正面无冲突、模糊、负面
+- fav 是好感度 0-100 的数字
+- ctx 是对话摘要，必须填写，50字以内
+- 3条回复风格各不相同，至少覆盖2种不同策略
+- 回复口语化自然，长度与对方发言匹配
+- 遵守话题禁区，参考用户偏好调整策略
+- 只返回JSON，不要其他内容`;
+}
+
+// ===== Advisor Analysis Prompt =====
+
+interface AdvisorPromptParams {
+  target: {
+    name: string;
+    persona: string;
+    hobbies: string;
+    tone_level: string;
+    goal_intent: string;
+  };
+  recentMessages: ChatMessage[];
+  contextSummary?: string;
+}
+
+export function buildAdvisorPrompt(params: AdvisorPromptParams): string {
+  const { target, recentMessages, contextSummary } = params;
+
+  const chatHistory = recentMessages.slice(-20).map(m => {
+    if (m.role === 'scene') return `【场景】${m.text}`;
+    return `${m.role === 'her' ? '对方' : '我'}：${m.text}`;
+  }).join('\n');
+
+  return `你是一位资深的社交军师，擅长分析聊天对象的心理状态。请从三个维度深度分析对方当前的状态。
+
+## 分析框架
+1. **态度**：对方对用户的态度倾向（积极/消极/犹豫/试探/冷淡）
+2. **情绪**：对方当下的情绪状态（好奇/兴趣/开心/无聊/烦躁/防备/期待）
+3. **想法**：对方心里可能在想什么，有什么期待或顾虑
+
+## 对方信息
+名字：${target.name}
+性格：${target.persona || '未填写'}
+兴趣：${target.hobbies || '未填写'}
+关系目标：${target.goal_intent || '正在追求对方'}
+
+${contextSummary ? `## 对话摘要\n${contextSummary}\n` : ''}
+## 聊天记录
+${chatHistory || '（暂无聊天记录）'}
+
+## 输出要求
+返回JSON：
+{"attitude":{"status":"态度状态","detail":"具体分析2-3句","evidence":"聊天记录中的证据"},"emotion":{"type":"情绪类型","detail":"具体分析2-3句","evidence":"聊天记录中的证据"},"thought":{"intention":"对方可能的意图","expectation":"对方期待什么","detail":"深入分析2-3句"},"nextStep":{"action":"建议的下一步具体行动","strategy":"推荐策略","keyPoints":["要点1","要点2","要点3"],"warnings":["注意事项1","注意事项2"]}}
+
+要求：
+- 态度状态可选值：积极、消极、犹豫、试探、冷淡
+- 情绪类型可选值：好奇、兴趣、开心、无聊、烦躁、防备、期待、矛盾
+- evidence 必须引用聊天记录中的具体内容作为依据
+- nextStep 要具体可执行，不要泛泛而谈
+- keyPoints 3-5个，warnings 1-3个
+- 只返回JSON，不要其他内容`;
+}
+
+// ===== Review Summary Prompt =====
+
+interface ReviewPromptParams {
+  target: {
+    name: string;
+    persona: string;
+    tone_level: string;
+  };
+  recentMessages: ChatMessage[];
+  replySelections: Array<{ reply_text: string; strategy: string | null }>;
+}
+
+export function buildReviewPrompt(params: ReviewPromptParams): string {
+  const { target, recentMessages, replySelections } = params;
+
+  const chatHistory = recentMessages.slice(-30).map(m => {
+    if (m.role === 'scene') return `【场景】${m.text}`;
+    return `${m.role === 'her' ? '对方' : '我'}：${m.text}`;
+  }).join('\n');
+
+  const selectedReplies = replySelections.length > 0
+    ? replySelections.map((s, i) => `${i + 1}. [${s.strategy || '自定义'}] ${s.reply_text}`).join('\n')
+    : '（暂无选择记录）';
+
+  return `你是一位社交聊天教练，擅长复盘用户的聊天表现。请仔细分析用户的聊天记录，指出亮点和踩坑，帮助用户提升。
+
+## 对方信息
+名字：${target.name}
+性格：${target.persona || '未填写'}
+
+## 聊天记录
+${chatHistory || '（暂无聊天记录）'}
+
+## 用户选择过的回复
+${selectedReplies}
+
+## 输出要求
+返回JSON：
+{"highlights":[{"round":1,"action":"用户做了什么","why":"为什么做得好","tip":"如何保持和加强"}],"mistakes":[{"round":2,"action":"用户做了什么","why":"为什么不好","better":"更好的做法"}],"overall":{"score":0-100,"summary":"总体表现评价2-3句","strengths":["优势1","优势2"],"weaknesses":["待提升1","待提升2"],"advice":"进阶建议2-3句"}}
+
+要求：
+- highlights（亮点）：找出用户做得好的地方，至少2条，多多益善
+- mistakes（踩坑）：指出用户犯的错误或遗憾的错过，至少1条
+- round 是指第几轮对话（从1开始）
+- 鼓励亮点：tip 要给出如何继续保持和强化的建议
+- 复盘踩坑：better 要给出具体可操作的替代做法
+- score 是综合评分（0-100），要客观公正
+- strengths 和 weaknesses 各 2-3 个关键词
+- advice 是整体进阶建议
+- 如果聊天记录太少（不足3轮），在 summary 中提示信息不足
+- 只返回JSON，不要其他内容`;
 }

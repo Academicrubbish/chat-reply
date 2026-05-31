@@ -13,18 +13,18 @@ import SignUpPage from './components/SignUpPage';
 import OnboardingPage from './components/OnboardingPage';
 import TargetSelector from './components/TargetSelector';
 import TargetModal from './components/TargetModal';
-import PersonCard from './components/PersonCard';
-import SessionBar from './components/SessionBar';
-import ContextBar from './components/ContextBar';
+import Toolbar from './components/Toolbar';
 import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
+import AnalysisDrawer, { AnalysisSteps } from './components/AnalysisDrawer';
+import { Card } from 'antd';
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -116,12 +116,26 @@ function AppContent() {
   };
 
   const handleRegenerate = async () => {
-    if (!state.currentSessionId) return;
-    dispatch({ type: 'TRIGGER_AI' });
+    if (!state.currentSessionId || state.phase === 'generating') return;
+    dispatch({ type: 'TRIGGER_REGENERATE' });
+
+    // Simulate step chain progression (regenerate is non-streaming)
+    const t1 = setTimeout(() => dispatch({ type: 'ADVANCE_REGEN_STEP' }), 1500);
+    const t2 = setTimeout(() => dispatch({ type: 'ADVANCE_REGEN_STEP' }), 3500);
+
+    // Get current round's roundId from replyVersions
+    const currentRoundId = state.replyVersions[state.activeVersionIndex]?.roundId;
+
     try {
-      const data = await api.regenerate(state.currentSessionId);
+      const data = await api.regenerate(state.currentSessionId, {
+        mode: aiMode === 'quick' ? 'quick' : 'full',
+        provider: selectedProvider,
+        roundId: currentRoundId,
+      });
+      clearTimeout(t1); clearTimeout(t2);
       dispatch({ type: 'GENERATE_SUCCESS', data });
     } catch (err: any) {
+      clearTimeout(t1); clearTimeout(t2);
       dispatch({ type: 'GENERATE_FAILURE', error: err.message });
     }
   };
@@ -232,11 +246,18 @@ function AppContent() {
           data-tour-id="ai-panel"
           style={isMobile ? { display: mobileTab === 'ai' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', borderRight: 'none' } : undefined}
         >
-          <PersonCard
+          <Toolbar
             target={currentTarget}
-            onEdit={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
-          />
-          <SessionBar
+            onEditTarget={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
+            onAIAssist={() => {
+              if (aiMode === 'advisor' || aiMode === 'review') {
+                triggerAnalysis(aiMode);
+              } else {
+                triggerAI();
+              }
+            }}
+            isGenerating={state.phase === 'generating' || state.isAnalyzing}
+            aiMode={aiMode}
             session={state.sessions.find(s => s.id === state.currentSessionId) || null}
             sessions={state.sessions}
             onSelectSession={switchSession}
@@ -245,8 +266,24 @@ function AppContent() {
             models={models}
             selectedProvider={selectedProvider}
             onSelectProvider={setSelectedProvider}
+            onTriggerAnalysis={triggerAnalysis}
+            onShowHistory={() => dispatch({ type: 'OPEN_ANALYSIS_DRAWER' })}
+            isAnalyzing={state.isAnalyzing}
+            analysisMode={state.analysisMode}
+            analysis={state.currentAnalysis}
           />
-          <ContextBar analysis={state.currentAnalysis} />
+
+          {/* Analysis step chain — visible in main panel during generation */}
+          {state.isAnalyzing && (
+            <Card size="small" style={{ margin: '8px 20px', borderLeft: '3px solid #3b5998' }}>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#3b5998' }}>
+                  {state.analysisMode === 'advisor' ? '军师分析中...' : '复盘总结中...'}
+                </span>
+              </div>
+              <AnalysisSteps currentStep={state.analysisStep} />
+            </Card>
+          )}
 
           {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
           <ErrorBoundary boundaryName="AI分析" fallback={(err, retry) => (
@@ -257,6 +294,7 @@ function AppContent() {
           )}>
           <RoundTimeline
             aiMessages={state.aiMessages}
+            replySelections={state.replySelections}
             phase={state.phase}
             currentAnalysis={state.currentAnalysis}
             currentReplies={state.currentReplies}
@@ -264,7 +302,10 @@ function AppContent() {
             generationStep={state.generationStep}
             streamingText={state.streamingText}
             favorabilityHistory={state.favorabilityHistory}
-            onSelectReply={(reply) => selectReplyAction(reply)}
+            replyVersions={state.replyVersions}
+            activeVersionIndex={state.activeVersionIndex}
+            onSwitchVersion={(index) => dispatch({ type: 'SWITCH_VERSION', index })}
+            onSelectReply={(reply, aiMessageId) => selectReplyAction(reply, aiMessageId)}
             onCustomReply={sendCustomReply}
             onRegenerate={handleRegenerate}
             onFeedback={handleFeedback}
@@ -279,9 +320,9 @@ function AppContent() {
         >
           <ChatHeader
             targetName={currentTarget?.name || ''}
-            onAIAssist={triggerAI}
             onReset={handleReset}
-            isGenerating={state.phase === 'generating'}
+            aiMode={aiMode}
+            onAiModeChange={setAiMode}
           />
           <ErrorBoundary boundaryName="聊天记录" fallback={(err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -317,6 +358,22 @@ function AppContent() {
         target={state.editingTarget}
         onClose={() => dispatch({ type: 'CLOSE_MODAL' })}
         onSave={handleSaveTarget}
+      />
+
+      {/* Analysis Drawer */}
+      <AnalysisDrawer
+        open={state.analysisDrawerOpen}
+        onClose={() => dispatch({ type: 'CLOSE_ANALYSIS_DRAWER' })}
+        analysisMode={state.analysisMode}
+        result={state.analysisResult}
+        targetName={currentTarget?.name || ''}
+        history={state.analysisHistory}
+        onSelectHistory={(record) => {
+          try {
+            const parsed = JSON.parse(record.content);
+            dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
+          } catch {}
+        }}
       />
     </>
   );

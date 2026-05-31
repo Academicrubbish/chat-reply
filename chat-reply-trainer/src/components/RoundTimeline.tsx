@@ -2,13 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { Collapse, Tag, Card, Button, Space, Input, Spin, Tooltip, message } from 'antd';
 import {
   LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled,
-  ReloadOutlined, AimOutlined, SendOutlined,
-  CheckCircleFilled, LoadingOutlined,
+  ReloadOutlined, SendOutlined,
+  CheckCircleFilled, CheckOutlined, LoadingOutlined,
+  LeftOutlined, RightOutlined,
 } from '@ant-design/icons';
-import type { AIMessage, AnalysisData, ReplyOption, AppPhase, GenerationStep, FavorabilityRecord } from '../types';
+import type { AIMessage, AnalysisData, ReplyOption, AppPhase, GenerationStep, FavorabilityRecord, ReplyVersion, ChatMessage, ReplySelection } from '../types';
 
 interface RoundTimelineProps {
   aiMessages: AIMessage[];
+  replySelections: ReplySelection[];
   phase: AppPhase;
   currentAnalysis: AnalysisData | null;
   currentReplies: ReplyOption[] | null;
@@ -16,43 +18,108 @@ interface RoundTimelineProps {
   generationStep: GenerationStep;
   streamingText: string;
   favorabilityHistory: FavorabilityRecord[];
-  onSelectReply: (reply: ReplyOption) => void;
+  replyVersions: ReplyVersion[];
+  activeVersionIndex: number;
+  onSwitchVersion: (index: number) => void;
+  onSelectReply: (reply: ReplyOption, aiMessageId?: string) => void;
   onCustomReply: (text: string) => void;
   onRegenerate: () => void;
   onFeedback: (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => void;
 }
 
-interface RoundData {
+interface RoundVersion {
   analysis: AnalysisData;
   replies: ReplyOption[];
-  plan?: { goal: string; nextStep: string };
+  aiMessageId?: string;
 }
 
-function parseAiMessages(aiMessages: AIMessage[]): RoundData[] {
-  const rounds: RoundData[] = [];
+interface HistoricalRound {
+  versions: RoundVersion[];
+  selectedReplyText: string | null;
+  selectedAiMessageId: string | null;
+}
+
+/** Parse ai_messages into rounds, grouping by round_id (with legacy fallback). */
+function parseAiMessages(aiMessages: AIMessage[]): HistoricalRound[] {
+  const hasRoundIds = aiMessages.some(m => m.role === 'assistant' && m.round_id);
+
+  if (hasRoundIds) {
+    // New path: group by round_id
+    const roundMap = new Map<string, RoundVersion[]>();
+    for (const msg of aiMessages) {
+      if (msg.role !== 'assistant') continue;
+      let data: any;
+      try { data = JSON.parse(msg.content); } catch { continue; }
+      if (!data.replies || data.replies.length === 0) continue;
+
+      const analysis: AnalysisData = data.analysis || {
+        stage: '快速模式', signal: '—', strategy: '—',
+        signalText: '快速模式无分析', emotions: [],
+        tip: '', favorability: 50, favorabilityReason: '',
+      };
+      const roundId = msg.round_id || `legacy-${msg.id}`;
+      const version: RoundVersion = { analysis, replies: data.replies, aiMessageId: msg.id };
+      if (!roundMap.has(roundId)) roundMap.set(roundId, []);
+      roundMap.get(roundId)!.push(version);
+    }
+    const rounds: HistoricalRound[] = [];
+    for (const [, versions] of roundMap) {
+      versions.sort((a, b) => (a.aiMessageId ? 0 : 0)); // insertion order is fine
+      rounds.push({ versions, selectedReplyText: null, selectedAiMessageId: null });
+    }
+    return rounds;
+  }
+
+  // Legacy fallback: sequence-based parsing for old data without round_id
+  const rounds: HistoricalRound[] = [];
+  let currentAssistantData: { analysis: AnalysisData; replies: ReplyOption[] } | null = null;
+
   for (const msg of aiMessages) {
-    if (msg.role !== 'assistant') continue;
-    try {
-      const data = JSON.parse(msg.content);
-      if (data.analysis && data.replies) {
-        rounds.push({
-          analysis: data.analysis,
-          replies: data.replies,
-          plan: data.plan,
-        });
+    if (msg.role === 'user') {
+      let parsed: any;
+      try { parsed = JSON.parse(msg.content); } catch { continue; }
+      if (parsed.type === 'regenerate') continue;
+      currentAssistantData = null;
+      continue;
+    }
+    if (msg.role === 'assistant') {
+      let data: any;
+      try { data = JSON.parse(msg.content); } catch { continue; }
+      if (!data.replies || data.replies.length === 0) continue;
+
+      const analysis: AnalysisData = data.analysis || {
+        stage: '快速模式', signal: '—', strategy: '—',
+        signalText: '快速模式无分析', emotions: [],
+        tip: '', favorability: 50, favorabilityReason: '',
+      };
+      const version: RoundVersion = { analysis, replies: data.replies, aiMessageId: msg.id };
+
+      if (currentAssistantData) {
+        rounds[rounds.length - 1].versions.push(version);
+      } else {
+        currentAssistantData = { analysis: data.analysis, replies: data.replies };
+        rounds.push({ versions: [version], selectedReplyText: null, selectedAiMessageId: null });
       }
-    } catch {
-      // skip unparseable
     }
   }
   return rounds;
 }
 
-/** Extract signalText from streaming JSON — only show signalText content */
-function formatStreamingText(raw: string): string {
-  const match = raw.match(/"signalText"\s*:\s*"([\s\S]*?)"/);
-  if (match) return match[1].replace(/\\n/g, ' ').trim();
-  return '';
+/** Match selected replies using explicit reply_selections data. */
+function matchSelectedReplies(rounds: HistoricalRound[], selections: ReplySelection[]): HistoricalRound[] {
+  return rounds.map(round => {
+    for (const sel of selections) {
+      const matchingVersion = round.versions.find(v => v.aiMessageId === sel.ai_message_id);
+      if (matchingVersion) {
+        return {
+          ...round,
+          selectedReplyText: sel.reply_text,
+          selectedAiMessageId: sel.ai_message_id,
+        };
+      }
+    }
+    return round;
+  });
 }
 
 const strategyTagColor: Record<string, string> = {
@@ -86,29 +153,20 @@ function ThoughtChainSteps({ currentStep }: { currentStep: GenerationStep }) {
 
         return (
           <div key={item.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            {/* Timeline dot + line */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 36 }}>
               {isDone ? (
                 <CheckCircleFilled style={{ fontSize: 16, color: '#52c41a' }} />
               ) : isActive ? (
                 <LoadingOutlined style={{ fontSize: 16, color: '#1677ff' }} spin />
               ) : (
-                <div style={{
-                  width: 16, height: 16, borderRadius: '50%',
-                  border: '2px solid #d9d9d9', background: '#fff',
-                }} />
+                <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #d9d9d9', background: '#fff' }} />
               )}
               {idx < STEP_ITEMS.length - 1 && (
-                <div style={{
-                  width: 2, flex: 1, minHeight: 14,
-                  background: isDone ? '#52c41a' : '#f0f0f0',
-                  marginTop: 2,
-                }} />
+                <div style={{ width: 2, flex: 1, minHeight: 14, background: isDone ? '#52c41a' : '#f0f0f0', marginTop: 2 }} />
               )}
             </div>
-            {/* Label */}
             <span style={{
-              fontSize: 13, lineHeight: '20px', paddingTop: isDone || isActive ? 0 : 0,
+              fontSize: 13, lineHeight: '20px',
               color: isDone ? '#52c41a' : isActive ? '#1677ff' : '#999',
               fontWeight: isActive ? 600 : 400,
             }}>
@@ -128,6 +186,7 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
   onFeedback: (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => void;
 }) {
   const [feedback, setFeedback] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
+  const [selected, setSelected] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
 
   const handleFeedback = (rating: 'thumbs_up' | 'thumbs_down') => {
@@ -140,24 +199,32 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
     });
   };
 
+  const handleClick = () => {
+    setSelected(true);
+    onSelectReply(reply);
+  };
+
   return (
     <>
       {contextHolder}
       <div
-        onClick={() => onSelectReply(reply)}
+        onClick={handleClick}
+        className={selected ? 'reply-card reply-card-selected' : 'reply-card'}
         style={{
           padding: '8px 10px',
-          border: '1px solid #e8e8e8',
+          border: selected ? '2px solid #1677ff' : '1px solid #e8e8e8',
           borderRadius: 8,
           cursor: 'pointer',
-          transition: 'border-color 0.2s',
+          transition: 'all 0.2s',
+          background: selected ? '#f0f5ff' : '#fff',
+          boxShadow: selected ? '0 0 0 2px rgba(22,119,255,0.1)' : 'none',
+          animation: 'replyFadeIn 0.3s ease-out',
         }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = '#3b5998')}
-        onMouseLeave={e => (e.currentTarget.style.borderColor = '#e8e8e8')}
       >
         <Tag color={strategyTagColor[reply.strategy] || 'default'} style={{ marginBottom: 4 }}>
           {reply.strategy}
         </Tag>
+        {selected && <Tag color="success" style={{ marginBottom: 4 }}>已选择</Tag>}
         <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', lineHeight: 1.5 }}>{reply.text}</div>
         <div style={{ fontSize: 11, color: '#999', lineHeight: 1.4 }}>{reply.reason}</div>
         <Space size={4} style={{ marginTop: 4 }}>
@@ -181,6 +248,28 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
   );
 }
 
+function VersionSwitcher({ current, total, onSwitch }: {
+  current: number; total: number; onSwitch: (idx: number) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
+      <Button size="small" type="text"
+        icon={<LeftOutlined />}
+        disabled={current <= 0}
+        onClick={() => onSwitch(current - 1)}
+      />
+      <span style={{ fontSize: 12, color: '#666', userSelect: 'none' }}>
+        {current + 1} / {total}
+      </span>
+      <Button size="small" type="text"
+        icon={<RightOutlined />}
+        disabled={current >= total - 1}
+        onClick={() => onSwitch(current + 1)}
+      />
+    </div>
+  );
+}
+
 function CurrentRoundCard({
   analysis,
   replies,
@@ -188,6 +277,9 @@ function CurrentRoundCard({
   generationStep,
   streamingText,
   favorabilityHistory,
+  replyVersions,
+  activeVersionIndex,
+  onSwitchVersion,
   onSelectReply,
   onCustomReply,
   onRegenerate,
@@ -199,20 +291,27 @@ function CurrentRoundCard({
   generationStep: GenerationStep;
   streamingText: string;
   favorabilityHistory: FavorabilityRecord[];
-  onSelectReply: (reply: ReplyOption) => void;
+  replyVersions: ReplyVersion[];
+  activeVersionIndex: number;
+  onSwitchVersion: (index: number) => void;
+  onSelectReply: (reply: ReplyOption, aiMessageId?: string) => void;
   onCustomReply: (text: string) => void;
   onRegenerate: () => void;
   onFeedback: (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => void;
 }) {
   const [customText, setCustomText] = useState('');
 
-  // Show generation steps when generating (before analysis arrives)
-  if (isGenerating && !analysis) {
+  // Get current version's aiMessageId for version-aware selection
+  const currentAiMessageId = replyVersions[activeVersionIndex]?.aiMessageId;
+
+  // First-time generation: no replies yet, show ThoughtChainSteps card
+  if (isGenerating && !replies) {
     return (
       <Card size="small" style={{ borderLeft: '3px solid #3b5998' }}>
         <ThoughtChainSteps currentStep={generationStep} />
         {streamingText && generationStep === 'parsing' && (() => {
-          const displayText = formatStreamingText(streamingText);
+          const match = streamingText.match(/"signalText"\s*:\s*"([\s\S]*?)"/);
+          const displayText = match ? match[1].replace(/\\n/g, ' ').trim() : '';
           return displayText ? (
             <div style={{
               marginTop: 8, padding: '8px 10px', background: '#f6f8fa',
@@ -228,23 +327,18 @@ function CurrentRoundCard({
     );
   }
 
-  // Don't render anything when idle with no data
-  if (!analysis && !replies) {
-    return null;
-  }
+  if (!analysis && !replies) return null;
 
   const handleCustomSend = () => {
     const trimmed = customText.trim();
-    if (trimmed) {
-      onCustomReply(trimmed);
-      setCustomText('');
-    }
+    if (trimmed) { onCustomReply(trimmed); setCustomText(''); }
   };
 
   const currentFav = analysis?.favorability ?? 0;
   const currentFavReason = analysis?.favorabilityReason || '';
   const prevFav = favorabilityHistory.length > 1 ? favorabilityHistory[favorabilityHistory.length - 2]?.value : null;
   const favDelta = prevFav !== null ? currentFav - prevFav : null;
+  const isRegenerating = isGenerating && replyVersions.length > 0;
 
   return (
     <Card
@@ -252,10 +346,10 @@ function CurrentRoundCard({
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, color: '#3b5998', fontWeight: 600 }}>当前轮次</span>
-          {isGenerating && !replies && (
+          {isGenerating && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <Spin size="small" />
-              <span style={{ fontSize: 11, color: '#999' }}>生成回复中...</span>
+              <span style={{ fontSize: 11, color: '#999' }}>重新生成中...</span>
             </span>
           )}
           {analysis && (
@@ -263,9 +357,7 @@ function CurrentRoundCard({
               <Tag color={currentFav >= 70 ? 'green' : currentFav >= 40 ? 'orange' : 'red'} style={{ marginLeft: 'auto', cursor: 'default' }}>
                 {`好感度 ${currentFav}`}
                 {favDelta !== null && favDelta !== 0 && (
-                  <span style={{ marginLeft: 4 }}>
-                    {favDelta > 0 ? `+${favDelta}` : `${favDelta}`}
-                  </span>
+                  <span style={{ marginLeft: 4 }}>{favDelta > 0 ? `+${favDelta}` : `${favDelta}`}</span>
                 )}
               </Tag>
             </Tooltip>
@@ -273,7 +365,26 @@ function CurrentRoundCard({
         </div>
       }
       style={{ borderLeft: '3px solid #3b5998' }}
+      styles={{ body: { position: 'relative' } } as any}
     >
+      {/* Regeneration mask — covers entire card body */}
+      {isRegenerating && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 10,
+          background: 'rgba(255,255,255,0.75)',
+          backdropFilter: 'blur(2px)',
+          borderRadius: '0 0 8px 8px',
+          display: 'flex', flexDirection: 'column',
+          justifyContent: 'center', alignItems: 'center',
+          padding: '16px 20px',
+          cursor: 'default',
+        }}>
+          <div style={{ width: '100%', maxWidth: 260 }}>
+            <ThoughtChainSteps currentStep={generationStep} />
+          </div>
+        </div>
+      )}
+
       {/* Analysis */}
       {analysis && (
         <div style={{ marginBottom: 10 }}>
@@ -282,9 +393,7 @@ function CurrentRoundCard({
             {analysis.signal && <Tag color="blue">{analysis.signal}</Tag>}
             {analysis.strategy && <Tag color="orange">{analysis.strategy}</Tag>}
           </div>
-          {analysis.signalText && (
-            <div style={{ fontSize: 12, color: '#333', lineHeight: 1.5 }}>{analysis.signalText}</div>
-          )}
+          {analysis.signalText && <div style={{ fontSize: 12, color: '#333', lineHeight: 1.5 }}>{analysis.signalText}</div>}
           {analysis.emotions?.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
               {analysis.emotions.map((e, i) => <Tag key={i} color="blue">{e}</Tag>)}
@@ -293,16 +402,25 @@ function CurrentRoundCard({
         </div>
       )}
 
-      {/* Reply options */}
+      {/* Version switcher */}
+      {replyVersions.length > 1 && !isGenerating && (
+        <VersionSwitcher
+          current={activeVersionIndex}
+          total={replyVersions.length}
+          onSwitch={onSwitchVersion}
+        />
+      )}
+
+      {/* Reply cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(replies ?? []).map(reply => (
-          <FeedbackReplyCard key={reply.id} reply={reply} onSelectReply={onSelectReply} onFeedback={onFeedback} />
+          <FeedbackReplyCard key={reply.id} reply={reply} onSelectReply={(r) => onSelectReply(r, currentAiMessageId)} onFeedback={onFeedback} />
         ))}
       </div>
 
       {/* Actions */}
       <Space style={{ marginTop: 10 }} size={8}>
-        <Button size="small" icon={<ReloadOutlined />} onClick={onRegenerate}>重新生成</Button>
+        <Button size="small" icon={<ReloadOutlined />} onClick={onRegenerate} disabled={isGenerating}>重新生成</Button>
       </Space>
 
       {/* Custom reply */}
@@ -324,8 +442,91 @@ function CurrentRoundCard({
   );
 }
 
+/** Stateful content inside a historical Collapse panel — proper React component so hooks are stable. */
+function HistoryRoundContent({ round }: { round: HistoricalRound }) {
+  const [versionIdx, setVersionIdx] = useState(round.versions.length - 1);
+  const v = round.versions[versionIdx] || round.versions[0];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+        {v.analysis.stage && <Tag color="green">{v.analysis.stage}</Tag>}
+        {v.analysis.signal && <Tag color="blue">{v.analysis.signal}</Tag>}
+        {v.analysis.strategy && <Tag color="orange">{v.analysis.strategy}</Tag>}
+      </div>
+      {v.analysis.signalText && (
+        <div style={{ fontSize: 12, color: '#333', lineHeight: 1.5, marginBottom: 6 }}>{v.analysis.signalText}</div>
+      )}
+      {v.analysis.favorabilityReason && (
+        <div style={{ fontSize: 11, color: '#52c41a', lineHeight: 1.4, marginBottom: 6 }}>
+          好感度分析：{v.analysis.favorabilityReason}
+        </div>
+      )}
+      {v.analysis.emotions?.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+          {v.analysis.emotions.map((e, i) => <Tag key={i} color="blue">{e}</Tag>)}
+        </div>
+      )}
+
+      {round.versions.length > 1 && (
+        <VersionSwitcher current={versionIdx} total={round.versions.length} onSwitch={setVersionIdx} />
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {v.replies.map(reply => {
+          const isSelected = round.selectedReplyText && reply.text === round.selectedReplyText
+            && (!round.selectedAiMessageId || v.aiMessageId === round.selectedAiMessageId);
+          return (
+            <div key={reply.id} style={{
+              padding: '6px 8px',
+              background: isSelected ? '#f0f5ff' : '#fafafa',
+              borderRadius: 6,
+              border: isSelected ? '1px solid #1677ff' : '1px solid #eee',
+              display: 'flex', alignItems: 'flex-start', gap: 6,
+            }}>
+              <div style={{ flex: 1 }}>
+                <Tag color={strategyTagColor[reply.strategy] || 'default'} style={{ marginBottom: 2 }}>
+                  {reply.strategy}
+                </Tag>
+                <div style={{ fontSize: 12, color: '#333', lineHeight: 1.4 }}>{reply.text}</div>
+              </div>
+              {isSelected && (
+                <CheckOutlined style={{ color: '#1677ff', fontSize: 14, marginTop: 4, flexShrink: 0 }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Build a Collapse item for a historical round (no hooks — safe to call in map). */
+function buildCollapseItem(round: HistoricalRound, idx: number) {
+  const first = round.versions[round.versions.length - 1] || round.versions[0];
+  return {
+    key: String(idx),
+    label: (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Round #{idx + 1}</span>
+        <Tag color={strategyTagColor[first.analysis.strategy] || 'default'}>{first.analysis.strategy}</Tag>
+        {first.analysis.signal && <Tag color="blue">{first.analysis.signal}</Tag>}
+        {first.analysis.favorability != null && (
+          <Tooltip title={first.analysis.favorabilityReason || undefined}>
+            <Tag color={first.analysis.favorability >= 70 ? 'green' : first.analysis.favorability >= 40 ? 'orange' : 'red'}>
+              好感度 {first.analysis.favorability}
+            </Tag>
+          </Tooltip>
+        )}
+      </div>
+    ),
+    children: <HistoryRoundContent round={round} />,
+  };
+}
+
 const RoundTimeline = React.memo(function RoundTimeline({
   aiMessages,
+  replySelections,
   phase,
   currentAnalysis,
   currentReplies,
@@ -333,74 +534,23 @@ const RoundTimeline = React.memo(function RoundTimeline({
   generationStep,
   streamingText,
   favorabilityHistory,
+  replyVersions,
+  activeVersionIndex,
+  onSwitchVersion,
   onSelectReply,
   onCustomReply,
   onRegenerate,
   onFeedback,
 }: RoundTimelineProps) {
-  const historicalRounds = useMemo(() => parseAiMessages(aiMessages), [aiMessages]);
+  const rawRounds = useMemo(() => parseAiMessages(aiMessages), [aiMessages]);
+  const historicalRounds = useMemo(() => matchSelectedReplies(rawRounds, replySelections), [rawRounds, replySelections]);
+
+  // Hide the last historical round when it matches the current active generation
   const displayRounds = phase === 'waiting_select' && currentAnalysis && currentReplies
     ? historicalRounds.slice(0, -1)
     : historicalRounds;
 
-  const collapseItems = displayRounds.map((round, idx) => ({
-    key: String(idx),
-    label: (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Round #{idx + 1}</span>
-        <Tag color={strategyTagColor[round.analysis.strategy] || 'default'}>
-          {round.analysis.strategy}
-        </Tag>
-        {round.analysis.signal && <Tag color="blue">{round.analysis.signal}</Tag>}
-        {round.analysis.favorability != null && (
-          <Tooltip title={round.analysis.favorabilityReason || undefined}>
-            <Tag color={round.analysis.favorability >= 70 ? 'green' : round.analysis.favorability >= 40 ? 'orange' : 'red'}>
-              好感度 {round.analysis.favorability}
-            </Tag>
-          </Tooltip>
-        )}
-      </div>
-    ),
-    children: (
-      <div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-          {round.analysis.stage && <Tag color="green">{round.analysis.stage}</Tag>}
-          {round.analysis.signal && <Tag color="blue">{round.analysis.signal}</Tag>}
-          {round.analysis.strategy && <Tag color="orange">{round.analysis.strategy}</Tag>}
-        </div>
-        {round.analysis.signalText && (
-          <div style={{ fontSize: 12, color: '#333', lineHeight: 1.5, marginBottom: 6 }}>
-            {round.analysis.signalText}
-          </div>
-        )}
-        {round.analysis.favorabilityReason && (
-          <div style={{ fontSize: 11, color: '#52c41a', lineHeight: 1.4, marginBottom: 6 }}>
-            好感度分析：{round.analysis.favorabilityReason}
-          </div>
-        )}
-        {round.analysis.emotions?.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-            {round.analysis.emotions.map((e, i) => <Tag key={i} color="blue">{e}</Tag>)}
-          </div>
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {round.replies.map(reply => (
-            <div key={reply.id} style={{
-              padding: '6px 8px',
-              background: '#fafafa',
-              borderRadius: 6,
-              border: '1px solid #eee',
-            }}>
-              <Tag color={strategyTagColor[reply.strategy] || 'default'} style={{ marginBottom: 2 }}>
-                {reply.strategy}
-              </Tag>
-              <div style={{ fontSize: 12, color: '#333', lineHeight: 1.4 }}>{reply.text}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    ),
-  }));
+  const collapseItems = displayRounds.map((round, idx) => buildCollapseItem(round, idx));
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '8px 20px' }}>
@@ -422,6 +572,9 @@ const RoundTimeline = React.memo(function RoundTimeline({
         generationStep={generationStep}
         streamingText={streamingText}
         favorabilityHistory={favorabilityHistory}
+        replyVersions={replyVersions}
+        activeVersionIndex={activeVersionIndex}
+        onSwitchVersion={onSwitchVersion}
         onSelectReply={onSelectReply}
         onCustomReply={onCustomReply}
         onRegenerate={onRegenerate}

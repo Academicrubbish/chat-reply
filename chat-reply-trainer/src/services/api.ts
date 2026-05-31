@@ -1,4 +1,4 @@
-import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption } from '../types';
+import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption, ReplySelection, AnalysisRecord } from '../types';
 
 const BASE = '/api';
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
@@ -98,6 +98,7 @@ export function generateReplyStream(
   provider: string = 'zhipu',
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
+  mode: string = 'full',
 ): AbortController {
   const ctrl = new AbortController();
   const token = localStorage.getItem('token');
@@ -106,7 +107,7 @@ export function generateReplyStream(
   fetch(`${BASE}/sessions/${sessionId}/generate`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ herMessage, provider }),
+    body: JSON.stringify({ herMessage, provider, mode }),
     signal: ctrl.signal,
   }).then(async (res) => {
     if (!res.ok) {
@@ -144,10 +145,10 @@ export function generateReplyStream(
   return ctrl;
 }
 
-export const selectReply = (sessionId: string, replyId: number) =>
-  request<{ success: boolean }>(`/sessions/${sessionId}/select-reply`, {
+export const selectReply = (sessionId: string, replyId: number, aiMessageId?: string) =>
+  request<{ success: boolean; messageId: string }>(`/sessions/${sessionId}/select-reply`, {
     method: 'POST',
-    body: JSON.stringify({ replyId }),
+    body: JSON.stringify({ replyId, aiMessageId }),
   });
 
 export const customReply = (sessionId: string, text: string) =>
@@ -156,11 +157,66 @@ export const customReply = (sessionId: string, text: string) =>
     body: JSON.stringify({ text }),
   });
 
-export const regenerate = (sessionId: string, preferredStrategy?: string) =>
+export const regenerate = (sessionId: string, opts?: { preferredStrategy?: string; mode?: string; provider?: string; roundId?: string }) =>
   request<GenerateResponse>(`/sessions/${sessionId}/regenerate`, {
     method: 'POST',
-    body: JSON.stringify({ preferredStrategy }),
+    body: JSON.stringify(opts ?? {}),
   });
+
+export const getReplySelections = (sessionId: string) =>
+  request<ReplySelection[]>(`/sessions/${sessionId}/selections`);
+
+export function analyzeStream(
+  sessionId: string,
+  mode: 'advisor' | 'review',
+  provider: string = 'zhipu',
+  onEvent: (evt: SSEEvent) => void,
+  onError?: (err: Error) => void,
+): AbortController {
+  const ctrl = new AbortController();
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  fetch(`${BASE}/sessions/${sessionId}/analyze`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ mode, provider }),
+    signal: ctrl.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: '请求失败' }));
+      onError?.(new Error(data.error || '分析失败'));
+      return;
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEvent = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
+        else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            onEvent({ event: currentEvent, data });
+          } catch {}
+        }
+      }
+    }
+  }).catch((err) => {
+    if (err.name !== 'AbortError') onError?.(err);
+  });
+  return ctrl;
+}
+
+export const getAnalyses = (targetId: string, type?: 'advisor' | 'review') =>
+  request<AnalysisRecord[]>(`/targets/${targetId}/analyses${type ? `?type=${type}` : ''}`);
 
 export const sendFeedback = (sessionId: string, replyId: number, rating: 'thumbs_up' | 'thumbs_down') =>
   request<{ success: boolean }>(`/sessions/${sessionId}/feedback`, {
