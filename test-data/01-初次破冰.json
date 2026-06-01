@@ -1,0 +1,30 @@
+{
+  "name": "初次破冰",
+  "description": "刚加微信，对方态度友好但双方还不熟。测试系统对初期接触阶段的识别、开场策略推荐和思维匹配能力。",
+  "target": {
+    "name": "小晴",
+    "meet_scene": "朋友聚会上认识的，互相加了微信",
+    "persona": "文静内敛，但不排斥聊天，偶尔会分享生活细节",
+    "hobbies": "看书，追剧，偶尔跑步",
+    "tone_level": "moderate",
+    "goal_intent": "pursuing",
+    "forbidden_topics": ""
+  },
+  "messages": [
+    { "role": "scene", "text": "聚会上认识后第二天晚上", "source": "场景补充" },
+    { "role": "me", "text": "昨天聚会挺开心的，你最后那个笑话我笑了好久", "source": "自定义回复" },
+    { "role": "her", "text": "哈哈是吗，我觉得大家当时都在配合我", "source": "手动输入" },
+    { "role": "me", "text": "配合也是需要实力的，我就说不了相声", "source": "自定义回复" },
+    { "role": "her", "text": "你也挺幽默的呀，昨天那个即兴发言不是挺好的嘛", "source": "手动输入" },
+    { "role": "me", "text": "那是我紧张了瞎说的哈哈", "source": "自定义回复" },
+    { "role": "her", "text": "看不出来你还紧张，我以为你很淡定呢", "source": "手动输入" },
+    { "role": "me", "text": "说实话见到你的时候确实有点紧张", "source": "自定义回复" },
+    { "role": "her", "text": "为什么呀", "source": "手动输入" }
+  ],
+  "expected": {
+    "stage": "初期接触",
+    "signal": "正面无冲突",
+    "knowledgeIds": ["F01", "F02", "P04"],
+    "tips": "对方用下切回应（看不出来你还紧张），说明愿意交流。'为什么呀'是好奇心，应该用女性思维描述感受而非男性思维直说目的。"
+  }
+}

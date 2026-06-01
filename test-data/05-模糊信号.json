@@ -1,0 +1,33 @@
+{
+  "name": "模糊信号",
+  "description": "对方主动联系但意图不明确——是聊天信号还是见面信号？测试系统对 C04（聊天信号vs见面信号）的识别和应对。",
+  "target": {
+    "name": "若琳",
+    "meet_scene": "朋友的朋友，微信上聊了一个多月",
+    "persona": "性格随和，说话不太直接，喜欢用表情包",
+    "hobbies": "唱歌，喝奶茶，刷短视频",
+    "tone_level": "moderate",
+    "goal_intent": "pursuing",
+    "forbidden_topics": ""
+  },
+  "messages": [
+    { "role": "scene", "text": "晚上11点，对方突然发来消息", "source": "场景补充" },
+    { "role": "her", "text": "你在做什么呀", "source": "手动输入" },
+    { "role": "me", "text": "刚到家，在看综艺，你呢", "source": "自定义回复" },
+    { "role": "her", "text": "我在楼下奶茶店等朋友，她迟到了好烦", "source": "手动输入" },
+    { "role": "me", "text": "你朋友也太不靠谱了，让你一个人等", "source": "自定义回复" },
+    { "role": "her", "text": "就是啊，气死我了，你在看什么综艺呀", "source": "手动输入" },
+    { "role": "me", "text": "脱口秀大会，你看过没？超好笑的", "source": "自定义回复" },
+    { "role": "her", "text": "看过呀！我喜欢那个呼兰，感觉他说话好有道理", "source": "手动输入" },
+    { "role": "me", "text": "对对对，他的逻辑太牛了，回头可以一起看", "source": "自定义回复" },
+    { "role": "her", "text": "好呀", "source": "手动输入" },
+    { "role": "me", "text": "你朋友来了没？别等太晚了", "source": "自定义回复" },
+    { "role": "her", "text": "还没呢，你在哪儿呀", "source": "手动输入" }
+  ],
+  "expected": {
+    "stage": "聊天升温",
+    "signal": "模糊",
+    "knowledgeIds": ["C04", "P08"],
+    "tips": "'你在做什么'是聊天信号，'你在哪儿'是见面信号——信号在对话中发生了转换。深夜主动联系大概率聊天信号。不应直接跳到邀约，先充分交流（P08走一步看一步）。"
+  }
+}

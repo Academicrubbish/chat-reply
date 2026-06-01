@@ -1,0 +1,32 @@
+{
+  "name": "诚意陷阱",
+  "description": "用户已经陷入典型的诚意陷阱——被冷落后加大投入，对方越来越冷淡。聊天记录呈现单向付出模式。测试系统对 C01/C02 的识别和警告。",
+  "target": {
+    "name": "晓月",
+    "meet_scene": "网上认识的，聊了一个多月",
+    "persona": "比较被动，回复越来越敷衍",
+    "hobbies": "不清楚，对方不怎么分享",
+    "tone_level": "conservative",
+    "goal_intent": "pursuing",
+    "forbidden_topics": ""
+  },
+  "messages": [
+    { "role": "scene", "text": "网上认识一个多月，前两周聊得不错，最近两周对方越来越冷淡", "source": "场景补充" },
+    { "role": "me", "text": "今天路过那家你说的蛋糕店，给你买了一盒马卡龙，周末给你送过去？", "source": "自定义回复" },
+    { "role": "her", "text": "不用了吧，太麻烦你了", "source": "手动输入" },
+    { "role": "me", "text": "不麻烦不麻烦，反正我也顺路", "source": "自定义回复" },
+    { "role": "her", "text": "真的不用", "source": "手动输入" },
+    { "role": "me", "text": "好吧…那你最近怎么都不怎么理我了", "source": "自定义回复" },
+    { "role": "her", "text": "最近比较忙", "source": "手动输入" },
+    { "role": "me", "text": "是我做错什么了吗？你告诉我我改", "source": "自定义回复" },
+    { "role": "her", "text": "没有，就是忙", "source": "手动输入" },
+    { "role": "me", "text": "那我等你忙完，不管多久我都等", "source": "自定义回复" },
+    { "role": "her", "text": "嗯", "source": "手动输入" }
+  ],
+  "expected": {
+    "stage": "初期接触",
+    "signal": "负面",
+    "knowledgeIds": ["C01", "C02", "P01"],
+    "tips": "典型诚意陷阱（C02）：被冷→买礼物→追问原因→表白等待，全程单向投入。对方全部上堆（不用了/比较忙/没有/嗯）。系统应发出诚意陷阱警告，建议停止加码投入，转向检查交流质量。"
+  }
+}

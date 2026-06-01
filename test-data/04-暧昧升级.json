@@ -1,0 +1,35 @@
+{
+  "name": "暧昧升级",
+  "description": "关系已经很熟，对方主动找你聊天、关心你、甚至有小要求。好感信号明确到'关注'甚至'依顺'级别。测试系统对升级时机的判断。",
+  "target": {
+    "name": "诗涵",
+    "meet_scene": "大学同学，毕业两年重新联系上",
+    "persona": "温柔细腻，偶尔撒娇，会主动分享心情",
+    "hobbies": "烘焙，养猫，逛街",
+    "tone_level": "moderate",
+    "goal_intent": "pursuing",
+    "forbidden_topics": ""
+  },
+  "messages": [
+    { "role": "scene", "text": "重新联系一个月，几乎每天都聊天", "source": "场景补充" },
+    { "role": "her", "text": "我家猫又把花瓶打碎了", "source": "手动输入" },
+    { "role": "me", "text": "哈哈这个小坏蛋，要不要我帮你教训它", "source": "自定义回复" },
+    { "role": "her", "text": "算了吧 你来了它只会更开心", "source": "手动输入" },
+    { "role": "me", "text": "那说明我魅力大啊 连猫都喜欢我", "source": "自定义回复" },
+    { "role": "her", "text": "臭美，不过你什么时候来看看它嘛", "source": "手动输入" },
+    { "role": "me", "text": "你想让我去？", "source": "自定义回复" },
+    { "role": "her", "text": "嗯…反正它也想见你", "source": "手动输入" },
+    { "role": "me", "text": "那就这周六吧，顺便带你去吃你上次说的那家日料", "source": "自定义回复" },
+    { "role": "her", "text": "好呀！你记得上次我说的那家店啊", "source": "手动输入" },
+    { "role": "me", "text": "当然记得，你说想去的时候你说了两遍", "source": "自定义回复" },
+    { "role": "her", "text": "讨厌，原来你当时在偷偷记", "source": "手动输入" },
+    { "role": "me", "text": "我还偷偷记了很多别的呢", "source": "自定义回复" },
+    { "role": "her", "text": "比如呢？说说看", "source": "手动输入" }
+  ],
+  "expected": {
+    "stage": "暧昧期",
+    "signal": "正面冲突",
+    "knowledgeIds": ["F03", "F04", "S04"],
+    "tips": "好感信号到依顺级别（主动邀你去她家、接受约会、撒娇）。'说说看'是继续互动的信号，可以释放性信息或继续扩大冲突。注意不要在此时表白（F06不可越级但已接近可升级阶段）。"
+  }
+}

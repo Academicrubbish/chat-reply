@@ -1,0 +1,30 @@
+{
+  "name": "上堆冷淡",
+  "description": "对方全程上堆语言，回复简短概括，明显不感兴趣或心不在焉。测试系统对负面信号的识别和应对策略。",
+  "target": {
+    "name": "思雨",
+    "meet_scene": "同事介绍认识的，加了一周微信",
+    "persona": "独立自主，工作很忙，对陌生人比较冷淡",
+    "hobbies": "健身，出差",
+    "tone_level": "conservative",
+    "goal_intent": "pursuing",
+    "forbidden_topics": ""
+  },
+  "messages": [
+    { "role": "scene", "text": "加微信一周，之前聊过两次都不太热络", "source": "场景补充" },
+    { "role": "me", "text": "今天加班到这么晚呀，辛苦了", "source": "自定义回复" },
+    { "role": "her", "text": "嗯", "source": "手动输入" },
+    { "role": "me", "text": "最近在忙什么项目呢", "source": "自定义回复" },
+    { "role": "her", "text": "工作", "source": "手动输入" },
+    { "role": "me", "text": "我记得你喜欢健身，晚上还去吗", "source": "自定义回复" },
+    { "role": "her", "text": "看情况吧", "source": "手动输入" },
+    { "role": "me", "text": "周末有什么安排吗？要是有空的话想请你喝杯咖啡", "source": "自定义回复" },
+    { "role": "her", "text": "谢谢关心", "source": "手动输入" }
+  ],
+  "expected": {
+    "stage": "初期接触",
+    "signal": "负面",
+    "knowledgeIds": ["F01", "P02", "P08"],
+    "tips": "全部上堆语言（嗯/工作/看情况吧/谢谢关心），最后一句是口号式结束信号。系统应识别为不感兴趣，建议不要追问原因（P02），见好就收（P08）。"
+  }
+}
