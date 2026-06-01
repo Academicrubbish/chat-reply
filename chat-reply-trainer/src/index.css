@@ -48,3 +48,17 @@ body {
   flex-direction: column;
   height: 100vh;
 }
+
+/* 确保 antd Tag 在容器内正常换行 */
+.ant-collapse-content-box,
+.ant-card-body {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.ant-tag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+}

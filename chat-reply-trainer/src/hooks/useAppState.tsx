@@ -360,6 +360,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       source: '手动输入',
     }).then(msg => {
       dispatch({ type: 'SEND_HER_MESSAGE', message: msg });
+
+      // 预请求：确保 session 已存在，这样 triggerAI 时可以跳过 createSession 等待
+      if (!state.currentSessionId && state.currentTargetId) {
+        api.createSession(state.currentTargetId).then(session => {
+          api.getSessions(state.currentTargetId!).then(sessions => {
+            dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: session.id });
+          });
+        }).catch(() => {});
+      }
     });
   };
 

@@ -190,7 +190,7 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
       label: <span><HeartOutlined style={{ marginRight: 6 }} />情绪判断</span>,
       children: (
         <div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
             <Tag color="purple">{emotion.type}</Tag>
             {emotion.valence && (
               <Tag color={emotion.valence === '正向' ? 'green' : emotion.valence === '负向' ? 'red' : 'default'}>
@@ -242,9 +242,9 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
           </div>
         )}
         {diagnosis.warnings?.length > 0 && (
-          <div style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {diagnosis.warnings.map((w, i) => (
-              <Tag key={i} color="warning" icon={<WarningOutlined />} style={{ marginBottom: 4 }}>{w}</Tag>
+              <Tag key={i} color="warning" icon={<WarningOutlined />}>{w}</Tag>
             ))}
           </div>
         )}
@@ -277,9 +277,9 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
             </ul>
           )}
           {nextStep.warnings?.length > 0 && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {nextStep.warnings.map((w, i) => (
-                <Tag key={i} color="warning" icon={<WarningOutlined />} style={{ marginBottom: 4 }}>{w}</Tag>
+                <Tag key={i} color="warning" icon={<WarningOutlined />}>{w}</Tag>
               ))}
             </div>
           )}
@@ -333,11 +333,15 @@ function ReviewView({ data }: { data: ReviewAnalysis }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 120 }}>
           <div style={{ fontSize: 12, color: '#52c41a', fontWeight: 600, marginBottom: 4 }}>✅ 优势</div>
-          {overall.strengths?.map((s, i) => <Tag key={i} color="success" style={{ marginBottom: 2 }}>{s}</Tag>)}
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {overall.strengths?.map((s, i) => <Tag key={i} color="success">{s}</Tag>)}
+          </div>
         </div>
         <div style={{ flex: 1, minWidth: 120 }}>
           <div style={{ fontSize: 12, color: '#fa8c16', fontWeight: 600, marginBottom: 4 }}>⚠️ 待提升</div>
-          {overall.weaknesses?.map((w, i) => <Tag key={i} color="warning" style={{ marginBottom: 2 }}>{w}</Tag>)}
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {overall.weaknesses?.map((w, i) => <Tag key={i} color="warning">{w}</Tag>)}
+          </div>
         </div>
       </div>
 

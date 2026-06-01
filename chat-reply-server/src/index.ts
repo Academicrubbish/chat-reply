@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
-import { buildAdvisorPrompt, buildReviewPrompt, buildFullMessages, buildQuickMessages } from './prompt';
+import { buildAdvisorPrompt, buildReviewPrompt, buildQuickMessages, buildFullMessagesOptimized } from './prompt';
 import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
 import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
@@ -280,32 +280,45 @@ const SAFE_FALLBACK = {
 };
 
 function parseJsonSafely(text: string): any | null {
+  // 快速路径：直接解析（启用 response_format 后大多数情况走这里）
   try { return JSON.parse(text); } catch {}
-  const stripped = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
-  try { return JSON.parse(stripped); } catch {}
-  const noChineseQuotes = stripped.replace(/[""]/g, '"');
-  try { return JSON.parse(noChineseQuotes); } catch {}
-  const firstBrace = noChineseQuotes.indexOf('{');
-  const lastBrace = noChineseQuotes.lastIndexOf('}');
+
+  // 预处理管道：一次性清洗所有常见问题
+  let cleaned = text
+    .replace(/```(?:json)?\s*/gi, '')   // 去掉 ```json 开头
+    .replace(/```\s*/g, '')              // 去掉 ``` 结尾
+    .replace(/[“”]/g, '"')     // 中文引号 → 英文引号
+    .replace(/[\x00-\x1f]/g, '')         // 去控制字符
+    .replace(/,\s*([}\]])/g, '$1');      // 去尾部逗号
+
+  try { return JSON.parse(cleaned); } catch {}
+
+  // 提取第一个 { 到最后一个 } 之间的内容
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
   if (firstBrace === -1) return null;
+
   let jsonStr = lastBrace > firstBrace
-    ? noChineseQuotes.slice(firstBrace, lastBrace + 1)
-    : noChineseQuotes.slice(firstBrace);
-  jsonStr = jsonStr.replace(/[\x00-\x1f]/g, '').replace(/,\s*([}\]])/g, '$1');
+    ? cleaned.slice(firstBrace, lastBrace + 1)
+    : cleaned.slice(firstBrace);
+
   try { return JSON.parse(jsonStr); } catch {}
-  let salvage = jsonStr;
-  const quoteCount = (salvage.match(/"/g) || []).length;
-  if (quoteCount % 2 !== 0) salvage += '"';
-  const openBrackets = (salvage.match(/\[/g) || []).length - (salvage.match(/\]/g) || []).length;
-  const openBraces = (salvage.match(/\{/g) || []).length - (salvage.match(/\}/g) || []).length;
-  for (let i = 0; i < openBrackets; i++) salvage += ']';
-  for (let i = 0; i < openBraces; i++) salvage += '}';
-  salvage = salvage.replace(/,\s*([}\]])/g, '$1');
+
+  // 修复截断：补齐引号和括号
+  const quoteCount = (jsonStr.match(/"/g) || []).length;
+  if (quoteCount % 2 !== 0) jsonStr += '"';
+  const openBrackets = (jsonStr.match(/\[/g) || []).length - (jsonStr.match(/\]/g) || []).length;
+  const openBraces = (jsonStr.match(/\{/g) || []).length - (jsonStr.match(/\}/g) || []).length;
+  for (let i = 0; i < openBrackets; i++) jsonStr += ']';
+  for (let i = 0; i < openBraces; i++) jsonStr += '}';
+  jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+
   try {
-    const result = JSON.parse(salvage);
+    const result = JSON.parse(jsonStr);
     console.log('[LLM] Salvaged truncated JSON successfully');
     return result;
   } catch {}
+
   return null;
 }
 
@@ -368,14 +381,16 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
-    const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(session.target_id) as any;
+    // 合并查询：一次性取 target 和消息（verifyTargetOwnership 已验证 target 存在）
+    const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(session.target_id, req.user.userId) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
 
     const now = Date.now();
 
     // Read context (her message already saved by frontend via sendHerMessage)
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(target.id).reverse();
-    const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(session.id);
+    // 只取最近10条 ai_messages（5轮），避免多轮对话时 token 爆炸
+    const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 10').all(session.id).reverse();
 
     // Build feedback preferences from ai_messages
     const feedbackPrefs = aiMessages
@@ -391,7 +406,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     // 拆分版：静态 system（可被 API 缓存）+ 动态 system（每次变化）
     const baseMessages = isQuick
       ? buildQuickMessages({ ...promptParams, contextSummary: session.context_summary || '' })
-      : buildFullMessages(promptParams);
+      : buildFullMessagesOptimized(promptParams);
 
     const conversationMessages: Array<{ role: string; content: string }> = [...baseMessages];
     if (!isQuick) {
@@ -605,16 +620,19 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       .get(session.target_id) as any;
     if (!lastHerMsg) { res.status(400).json({ error: '没有对方消息' }); return; }
 
-    const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(session.target_id) as any;
+    // 合并查询：带 user_id 验证
+    const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(session.target_id, req.user.userId) as any;
+    if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(session.target_id).reverse();
-    const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(session.id);
+    // 只取最近10条（5轮），与 generate 一致
+    const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 10').all(session.id).reverse();
 
     const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' } as any;
 
     // 拆分版 messages（静态 + 动态），复用 generate 的优化逻辑
     const baseMessages = isQuick
       ? buildQuickMessages({ ...promptParams, contextSummary: session.context_summary || '' })
-      : buildFullMessages(promptParams);
+      : buildFullMessagesOptimized(promptParams);
     const conversationMessages: Array<{ role: string; content: string }> = [...baseMessages];
     if (!isQuick) {
       for (const aiMsg of aiMessages as any[]) { conversationMessages.push({ role: aiMsg.role as string, content: aiMsg.content as string }); }
@@ -752,7 +770,7 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     let raw = '';
     const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 2048)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 4096)) {
         raw += delta;
         send('delta', { text: delta });
       }

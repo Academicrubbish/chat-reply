@@ -105,6 +105,166 @@ ${getCachedStaticPrompt('quick')}
 - 遵守话题禁区`;
 }
 
+// ============ 知识按需注入 ============
+
+/** 核心框架 ID — 无论消息内容如何，始终注入 */
+const CORE_UNIT_IDS = new Set(['F01', 'F03']);
+
+/** 根据对方最新消息，筛选最相关的知识单元 */
+function selectRelevantUnits(allUnits: KnowledgeUnit[], lastMessage: string, mode: ModeType): KnowledgeUnit[] {
+  // 1. 始终包含核心框架
+  const coreUnits = allUnits.filter(u => CORE_UNIT_IDS.has(u.id));
+
+  // 2. 关键词匹配：遍历每个单元的 triggers.languageSignals
+  const matchedUnits = allUnits.filter(u => {
+    if (CORE_UNIT_IDS.has(u.id)) return false; // 已在核心中
+    return u.triggers.some(t =>
+      t.modes.includes(mode) &&
+      t.languageSignals.some(signal => {
+        // 模糊匹配：信号是消息的子串，或消息包含信号关键词
+        if (signal.length <= 4) {
+          // 短信号（如"嗯"、"好的"）精确匹配
+          return lastMessage.includes(signal);
+        }
+        // 长信号提取关键词匹配
+        const keywords = signal.replace(/[？?！!。，,、]/g, '').split(/\s+/).filter(w => w.length >= 2);
+        return keywords.some(kw => lastMessage.includes(kw));
+      })
+    );
+  });
+
+  // 3. 合并去重
+  const seen = new Set<string>();
+  const result: KnowledgeUnit[] = [];
+  for (const u of [...coreUnits, ...matchedUnits]) {
+    if (!seen.has(u.id)) {
+      seen.add(u.id);
+      result.push(u);
+    }
+  }
+
+  // 4. 保底：如果匹配太少（<3个），从当前 mode 的单元中按优先级补充
+  const modeUnits = allUnits.filter(u =>
+    u.modes.includes(mode) && !seen.has(u.id)
+  );
+  const fallback = modeUnits
+    .sort((a, b) => (b.priority || 3) - (a.priority || 3))
+    .slice(0, Math.max(0, 3 - result.length));
+  for (const u of fallback) {
+    if (!seen.has(u.id)) {
+      seen.add(u.id);
+      result.push(u);
+    }
+  }
+
+  return result;
+}
+
+/** 格式化按需筛选后的知识（full mode 使用） */
+function formatSelectedKnowledge(units: KnowledgeUnit[], mode: ModeType): string {
+  return formatKnowledgeSection(units, mode);
+}
+
+/** 构建按需注入版 full mode 的动态上下文 */
+export function buildFullDynamicContextOptimized(params: PromptParams): string {
+  const { target, recentMessages, planGoal, planNextStep, feedbackPreferences } = params;
+  const chatHistory = formatChatHistory(recentMessages);
+
+  // 获取对方最新消息用于关键词匹配
+  const lastHerMsg = [...recentMessages].reverse().find(m => m.role === 'her');
+  const lastMessage = lastHerMsg?.text || '';
+
+  // 按需选择知识单元
+  const allUnits = getUnitsForMode('full');
+  const selectedUnits = selectRelevantUnits(allUnits, lastMessage, 'full');
+  const knowledge = formatSelectedKnowledge(selectedUnits, 'full');
+
+  console.log(`[Prompt] Selected ${selectedUnits.length}/${allUnits.length} knowledge units: ${selectedUnits.map(u => u.id).join(',')}`);
+
+  const context = buildContextBlock(target, chatHistory, {
+    '语气偏好': toneMapFull[target.tone_level] || '适中',
+    '目标意图': goalMap[target.goal_intent] || '正在追求对方',
+    '话题禁区': target.forbidden_topics || '无',
+    '当前目标': planGoal || '探索阶段，建立舒适感',
+    '下一步建议': planNextStep || '自然对话，寻找共同话题',
+  });
+  const feedback = feedbackPreferences ? `\n## 历史反馈偏好\n${feedbackPreferences}\n` : '';
+
+  return `${context}
+${feedback}# 输出要求
+
+分析对方最新消息，返回JSON：
+{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+
+要求：
+- 生成3-4条回复，风格各异，至少1条安全回复
+- 回复口语化自然，长度与对方发言匹配
+- 每条标注策略名、理由和对应的知识单元ID
+- 遵守语气偏好和话题禁区
+- 基于历史反馈调整策略权重
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
+}
+
+/** 按需注入版 full mode 静态前缀（角色 + 红线，不含知识） */
+export function getFullStaticPrefixOptimized(): string {
+  return `你是一个专业的社交聊天辅导AI，帮助用户分析对方消息并生成回复建议。你的核心方法论来自《魔鬼约会学》，严格按照以下知识体系运作。
+
+# 红线禁忌
+
+1. 对方明确拒绝时不得死缠烂打
+2. 对方情绪不好（真生气/难过）时不使用扩大冲突
+3. 不得生成涉及骚扰、强迫、不尊重的回复
+4. 所有进攻型技巧的前提是对方的正面回应，没有正面回应就不能升级
+5. 不要生成过于"油腻"或套路感过强的回复
+6. 用表达自己来代替评价对方（安全法则）`;
+}
+
+/** 按需注入版 full messages（静态角色+红线 | 动态知识+上下文） */
+export function buildFullMessagesOptimized(params: PromptParams): Array<{ role: string; content: string }> {
+  const { target, recentMessages, planGoal, planNextStep, feedbackPreferences } = params;
+  const chatHistory = formatChatHistory(recentMessages);
+
+  // 获取对方最新消息用于关键词匹配
+  const lastHerMsg = [...recentMessages].reverse().find(m => m.role === 'her');
+  const lastMessage = lastHerMsg?.text || '';
+
+  // 按需选择知识单元
+  const allUnits = getUnitsForMode('full');
+  const selectedUnits = selectRelevantUnits(allUnits, lastMessage, 'full');
+  const knowledge = formatSelectedKnowledge(selectedUnits, 'full');
+
+  console.log(`[Prompt] Selected ${selectedUnits.length}/${allUnits.length} knowledge units: ${selectedUnits.map(u => u.id).join(',')}`);
+
+  // 动态 system = 知识 + 上下文 + 输出要求
+  const context = buildContextBlock(target, chatHistory, {
+    '语气偏好': toneMapFull[target.tone_level] || '适中',
+    '目标意图': goalMap[target.goal_intent] || '正在追求对方',
+    '话题禁区': target.forbidden_topics || '无',
+    '当前目标': planGoal || '探索阶段，建立舒适感',
+    '下一步建议': planNextStep || '自然对话，寻找共同话题',
+  });
+  const feedback = feedbackPreferences ? `\n## 历史反馈偏好\n${feedbackPreferences}\n` : '';
+
+  const dynamicContent = `# 知识体系\n\n${knowledge}\n\n${context}
+${feedback}# 输出要求
+
+分析对方最新消息，返回JSON：
+{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+
+要求：
+- 生成3-4条回复，风格各异，至少1条安全回复
+- 回复口语化自然，长度与对方发言匹配
+- 每条标注策略名、理由和对应的知识单元ID
+- 遵守语气偏好和话题禁区
+- 基于历史反馈调整策略权重
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
+
+  return [
+    { role: 'system', content: getFullStaticPrefixOptimized() },
+    { role: 'system', content: dynamicContent },
+  ];
+}
+
 // ============ 工具函数 ============
 
 const toneMapFull: Record<string, string> = {
@@ -286,7 +446,7 @@ ${feedback}
 - 每条标注策略名、理由和对应的知识单元ID
 - 遵守语气偏好和话题禁区
 - 基于历史反馈调整策略权重
-- 只返回JSON`;
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 }
 
 // ============ 拆分版 Prompt 构建函数（用于 API Prompt Caching） ============
@@ -315,7 +475,7 @@ ${feedback}# 输出要求
 - 每条标注策略名、理由和对应的知识单元ID
 - 遵守语气偏好和话题禁区
 - 基于历史反馈调整策略权重
-- 只返回JSON`;
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 }
 
 /** 构建拆分版的 full mode messages 数组（静态 + 动态分离） */
@@ -348,7 +508,7 @@ ${chatHistory || '（暂无）'}
 - ctx必须填写，50字以内
 - 3条回复风格各不同，至少覆盖2种策略
 - 回复口语化自然，长度与对方发言匹配
-- 只返回JSON`;
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 
   return [
     { role: 'system', content: getQuickStaticPrefix() },
@@ -408,7 +568,7 @@ ${context}
 - ctx必须填写，50字以内
 - 3条回复风格各不同，至少覆盖2种策略
 - 回复口语化自然，长度与对方发言匹配
-- 只返回JSON`;
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 }
 
 export function buildAdvisorPrompt(params: AdvisorPromptParams): string {
@@ -448,7 +608,7 @@ ${chatHistory || '（暂无聊天记录）'}
 - nextStep要具体可执行，不要泛泛而谈
 - warnings要指出用户可能犯的错误
 - 如果聊天记录太少，在thought.detail中说明信息不足
-- 只返回JSON`;
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 }
 
 export function buildReviewPrompt(params: ReviewPromptParams): string {
@@ -500,5 +660,5 @@ ${selectedReplies}
 - warningLevel：green=状态健康 yellow=需要调整 red=存在诚意陷阱或真命天女症倾向
 - knowledgeGaps：指出用户最需要补强的1-3个知识单元
 - 如果聊天记录太少（不足3轮），在summary中提示信息不足
-- 只返回JSON`;
+- 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 }
