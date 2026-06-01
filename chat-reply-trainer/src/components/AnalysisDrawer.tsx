@@ -346,13 +346,13 @@ function ReviewView({ data }: { data: ReviewAnalysis }) {
       </div>
 
       {/* Knowledge Gaps */}
-      {overall.knowledgeGaps?.length > 0 && (
+      {overall.knowledgeGaps && overall.knowledgeGaps.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 12, color: '#1677ff', fontWeight: 600, marginBottom: 4 }}>
             <RadarChartOutlined style={{ marginRight: 4 }} />建议补强的知识
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {overall.knowledgeGaps.map((kid) => <KnowledgeTag key={kid} id={kid} />)}
+            {overall.knowledgeGaps.map((kid: string) => <KnowledgeTag key={kid} id={kid} />)}
           </div>
         </div>
       )}

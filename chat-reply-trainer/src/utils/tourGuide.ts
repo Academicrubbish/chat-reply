@@ -20,7 +20,6 @@ export function startTour() {
     doneBtnText: '完成',
     nextBtnText: '下一步',
     prevBtnText: '上一步',
-    closeBtnText: '跳过引导',
     onDestroyStarted: () => {
       localStorage.setItem(TOUR_KEY, 'true');
       sessionStorage.removeItem(JUST_REGISTERED_KEY);

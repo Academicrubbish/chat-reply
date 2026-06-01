@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Empty, message } from 'antd';
-import { LogoutOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, message } from 'antd';
+import { LogoutOutlined } from '@ant-design/icons';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import * as api from './services/api';
 import { parseChatWithMeta } from './utils/parseChat';
@@ -344,7 +344,7 @@ function AppContent() {
           )}
 
           {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
-          <ErrorBoundary boundaryName="AI分析" fallback={(err, retry) => (
+          <ErrorBoundary boundaryName="AI分析" fallback={(_err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
               <div style={{ fontSize: 14, marginBottom: 8 }}>AI 分析区域加载失败</div>
               <button onClick={retry} style={{ padding: '4px 16px', border: '1px solid #3b5998', borderRadius: 6, background: '#3b5998', color: '#fff', cursor: 'pointer', fontSize: 12 }}>重试</button>
@@ -382,7 +382,7 @@ function AppContent() {
             aiMode={aiMode}
             onAiModeChange={setAiMode}
           />
-          <ErrorBoundary boundaryName="聊天记录" fallback={(err, retry) => (
+          <ErrorBoundary boundaryName="聊天记录" fallback={(_err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
               <div style={{ fontSize: 14, marginBottom: 8 }}>聊天记录加载失败</div>
               <button onClick={retry} style={{ padding: '4px 16px', border: '1px solid #3b5998', borderRadius: 6, background: '#3b5998', color: '#fff', cursor: 'pointer', fontSize: 12 }}>重试</button>

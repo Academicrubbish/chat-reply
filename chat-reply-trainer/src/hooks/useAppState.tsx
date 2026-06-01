@@ -122,7 +122,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'STREAM_REPLIES': {
-      const newVersion = { analysis: state.currentAnalysis, replies: action.replies };
+      const newVersion = { analysis: state.currentAnalysis!, replies: action.replies };
       const versions = state.replyVersions.length > 0
         ? [...state.replyVersions, newVersion]
         : [newVersion];
@@ -150,7 +150,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         replyVersions: state.replyVersions.length > 0
           ? state.replyVersions.map((v, i) =>
               i === state.replyVersions.length - 1 ? { ...v, replies: updated } : v)
-          : [{ analysis: state.currentAnalysis, replies: updated }],
+          : [{ analysis: state.currentAnalysis!, replies: updated }],
         activeVersionIndex: Math.max(0, state.replyVersions.length - 1),
       };
     }
@@ -533,7 +533,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const result = await api.customReply(state.currentSessionId, text);
       const msg: ChatMessage = {
-        id: result.messageId || '', target_id: state.currentTargetId, role: 'me',
+        id: (result as any).messageId || '', target_id: state.currentTargetId, role: 'me',
         text, source: '自定义回复', strategy: null,
         session_id: state.currentSessionId, created_at: Date.now(),
       };

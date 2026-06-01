@@ -6,7 +6,7 @@ import {
   CheckCircleFilled, CheckOutlined, LoadingOutlined,
   LeftOutlined, RightOutlined,
 } from '@ant-design/icons';
-import type { AIMessage, AnalysisData, ReplyOption, AppPhase, GenerationStep, FavorabilityRecord, ReplyVersion, ChatMessage, ReplySelection } from '../types';
+import type { AIMessage, AnalysisData, ReplyOption, AppPhase, GenerationStep, FavorabilityRecord, ReplyVersion, ReplySelection } from '../types';
 
 interface RoundTimelineProps {
   aiMessages: AIMessage[];
@@ -64,7 +64,7 @@ function parseAiMessages(aiMessages: AIMessage[]): HistoricalRound[] {
     }
     const rounds: HistoricalRound[] = [];
     for (const [, versions] of roundMap) {
-      versions.sort((a, b) => (a.aiMessageId ? 0 : 0)); // insertion order is fine
+      versions.sort((_a, _b) => (0)); // insertion order is fine
       rounds.push({ versions, selectedReplyText: null, selectedAiMessageId: null });
     }
     return rounds;

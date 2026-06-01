@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Input, Button, message } from 'antd';
+import { Input, Button } from 'antd';
 import * as api from '../services/api';
 import { markJustRegistered } from '../utils/tourGuide';
 

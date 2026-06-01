@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Empty, Button, Input, Space, message } from 'antd';
+import { Empty, Button, Input, Space } from 'antd';
 import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { ChatMessage } from '../types';
 import type { ParsedMessage } from '../utils/parseChat';
