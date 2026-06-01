@@ -108,16 +108,41 @@ export interface GenerateResponse {
 export type AiMode = 'full' | 'quick' | 'advisor' | 'review';
 
 export interface AdvisorAnalysis {
-  attitude: { status: string; detail: string; evidence: string };
-  emotion: { type: string; detail: string; evidence: string };
+  attitude: { status: string; level?: string; languagePattern?: string; detail: string; evidence: string };
+  emotion: { type: string; valence?: string; detail: string; evidence: string };
   thought: { intention: string; expectation: string; detail: string };
+  diagnosis?: {
+    warnings: string[];
+    stage: string;
+    upgradeReady: boolean;
+    upgradeReason: string;
+    knowledgeIds: string[];
+  };
   nextStep: { action: string; strategy: string; keyPoints: string[]; warnings: string[] };
 }
 
+export interface ReviewScores {
+  signalRecognition: number;
+  strategySelection: number;
+  rhythmControl: number;
+  emotionManagement: number;
+  responseQuality: number;
+}
+
 export interface ReviewAnalysis {
-  highlights: Array<{ round: number; action: string; why: string; tip: string }>;
-  mistakes: Array<{ round: number; action: string; why: string; better: string }>;
-  overall: { score: number; summary: string; strengths: string[]; weaknesses: string[]; advice: string };
+  highlights: Array<{ round: number; action: string; why: string; whyGood?: string; tip: string }>;
+  mistakes: Array<{ round: number; action: string; why: string; whyBad?: string; better: string }>;
+  scores?: ReviewScores;
+  overall: {
+    score: number;
+    total?: number;
+    summary: string;
+    strengths: string[];
+    weaknesses: string[];
+    advice: string;
+    warningLevel?: 'green' | 'yellow' | 'red';
+    knowledgeGaps?: string[];
+  };
 }
 
 export interface AnalysisRecord {

@@ -10,6 +10,7 @@ import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
 import { buildSystemPrompt, buildQuickPrompt, buildAdvisorPrompt, buildReviewPrompt } from './prompt';
 import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
+import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -108,6 +109,9 @@ app.use('/api', (req: Request, res: Response, next) => {
 app.get('/api/models', (_req: Request, res: Response) => {
   res.json({ models: getAvailableModels() });
 });
+
+// Knowledge routes
+app.use('/api/knowledge', knowledgeRoutes);
 
 // ===== Targets CRUD =====
 app.get('/api/targets', (req: any, res: Response) => {
@@ -732,10 +736,47 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
       return;
     }
 
-    // Save to DB
+    // Save to ai_messages
     const aiMsgId = uuid();
     db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, msg_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(aiMsgId, session.id, 'assistant', JSON.stringify(parsed), null, 1, mode, Date.now());
+
+    // ===== 自动存储到评估/诊断/警告表 =====
+    if (mode === 'advisor' && parsed.diagnosis) {
+      const diag = parsed.diagnosis;
+      db.prepare(`INSERT INTO chat_diagnoses (id, session_id, target_id, attitude_level, language_pattern, emotion_type, emotion_valence, stage, upgrade_ready, upgrade_reason, warnings_json, action, strategy, knowledge_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(uuid(), session.id, target.id,
+          parsed.attitude?.level || '', parsed.attitude?.languagePattern || '',
+          parsed.emotion?.type || '', parsed.emotion?.valence || '',
+          diag.stage || '', diag.upgradeReady ? 1 : 0, diag.upgradeReason || '',
+          JSON.stringify(diag.warnings || []),
+          parsed.nextStep?.action || '', parsed.nextStep?.strategy || '',
+          JSON.stringify(diag.knowledgeIds || []), Date.now());
+      // 累积警告
+      for (const w of (diag.warnings || [])) {
+        let wt = 'other';
+        if (/诚意陷阱|诚意/.test(w)) wt = 'sincerity_trap';
+        else if (/真命天女|迷恋/.test(w)) wt = 'oneitis';
+        else if (/因果链|放大/.test(w)) wt = 'causal_chain';
+        else if (/越级|操之过急/.test(w)) wt = 'over_escalation';
+        else if (/需求感|暴露/.test(w)) wt = 'neediness';
+        const existing = db.prepare('SELECT id, count FROM user_warnings WHERE user_id = ? AND target_id = ? AND warning_type = ?').get(req.user.userId, target.id, wt) as any;
+        if (existing) {
+          db.prepare('UPDATE user_warnings SET count = count + 1, detail = ?, updated_at = ? WHERE id = ?').run(w, Date.now(), existing.id);
+        } else {
+          db.prepare('INSERT INTO user_warnings (id, user_id, target_id, warning_type, detail, count, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(uuid(), req.user.userId, target.id, wt, w, Date.now());
+        }
+      }
+    }
+    if (mode === 'review' && parsed.scores) {
+      const ov = parsed.overall || {};
+      db.prepare(`INSERT INTO chat_evaluations (id, session_id, target_id, scores_json, total_score, warning_level, highlights_json, mistakes_json, strengths, weaknesses, advice, knowledge_gaps, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(uuid(), session.id, target.id,
+          JSON.stringify(parsed.scores), ov.total || 0, ov.warningLevel || 'green',
+          JSON.stringify(parsed.highlights || []), JSON.stringify(parsed.mistakes || []),
+          JSON.stringify(ov.strengths || []), JSON.stringify(ov.weaknesses || []),
+          ov.advice || '', JSON.stringify(ov.knowledgeGaps || []), Date.now());
+    }
 
     send('analysis_done', { result: parsed, aiMessageId: aiMsgId });
     res.end();
@@ -766,6 +807,37 @@ app.get('/api/targets/:targetId/analyses', (req: any, res: Response) => {
   }
   query += ' ORDER BY created_at DESC LIMIT 50';
   res.json(db.prepare(query).all(...params));
+});
+
+// ===== 评估记录查询 =====
+app.get('/api/targets/:targetId/evaluations', (req: any, res: Response) => {
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.targetId) as any;
+  if (!target || target.user_id !== req.user.userId) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+  const rows = db.prepare('SELECT * FROM chat_evaluations WHERE target_id = ? ORDER BY created_at DESC LIMIT 20').all(req.params.targetId) as any[];
+  res.json(rows.map(e => ({
+    ...e, scores: JSON.parse(e.scores_json), highlights: JSON.parse(e.highlights_json),
+    mistakes: JSON.parse(e.mistakes_json), strengths: JSON.parse(e.strengths),
+    weaknesses: JSON.parse(e.weaknesses), knowledgeGaps: JSON.parse(e.knowledge_gaps),
+    scores_json: undefined, highlights_json: undefined, mistakes_json: undefined, knowledge_gaps: undefined,
+  })));
+});
+
+// ===== 诊断记录查询 =====
+app.get('/api/targets/:targetId/diagnoses', (req: any, res: Response) => {
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.targetId) as any;
+  if (!target || target.user_id !== req.user.userId) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+  const rows = db.prepare('SELECT * FROM chat_diagnoses WHERE target_id = ? ORDER BY created_at DESC LIMIT 20').all(req.params.targetId) as any[];
+  res.json(rows.map(d => ({
+    ...d, warnings: JSON.parse(d.warnings_json), knowledgeIds: JSON.parse(d.knowledge_ids),
+    warnings_json: undefined, knowledge_ids: undefined,
+  })));
+});
+
+// ===== 累积警告查询 =====
+app.get('/api/targets/:targetId/warnings', (req: any, res: Response) => {
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(req.params.targetId) as any;
+  if (!target || target.user_id !== req.user.userId) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+  res.json(db.prepare('SELECT * FROM user_warnings WHERE user_id = ? AND target_id = ? ORDER BY updated_at DESC').all(req.user.userId, req.params.targetId));
 });
 
 app.post('/api/sessions/:sessionId/feedback', (req: any, res: Response) => {

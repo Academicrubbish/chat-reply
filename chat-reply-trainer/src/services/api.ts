@@ -220,3 +220,20 @@ export const sendFeedback = (sessionId: string, replyId: number, rating: 'thumbs
     method: 'POST',
     body: JSON.stringify({ replyId, rating }),
   });
+
+// Evaluations & Diagnoses
+export const getEvaluations = (targetId: string) =>
+  request<any[]>(`/targets/${targetId}/evaluations`);
+
+export const getDiagnoses = (targetId: string) =>
+  request<any[]>(`/targets/${targetId}/diagnoses`);
+
+export const getWarnings = (targetId: string) =>
+  request<any[]>(`/targets/${targetId}/warnings`);
+
+// Knowledge base
+export const getKnowledgeUnits = () =>
+  request<{ units: any[]; total: number }>('/knowledge/units');
+
+export const getKnowledgeMode = (mode: string) =>
+  request<any>(`/knowledge/mode/${mode}`);

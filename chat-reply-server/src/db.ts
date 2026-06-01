@@ -273,6 +273,67 @@ export async function initDb(): Promise<void> {
     dbWrapper.exec(`CREATE INDEX IF NOT EXISTS idx_ai_messages_type ON ai_messages(session_id, msg_type)`);
   } catch {}
 
+  // ===== 新增：评估/诊断/警告表 =====
+
+  dbWrapper.exec(`
+    CREATE TABLE IF NOT EXISTS chat_evaluations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      scores_json TEXT NOT NULL,
+      total_score INTEGER NOT NULL,
+      warning_level TEXT NOT NULL DEFAULT 'green',
+      highlights_json TEXT NOT NULL,
+      mistakes_json TEXT NOT NULL,
+      strengths TEXT DEFAULT '',
+      weaknesses TEXT DEFAULT '',
+      advice TEXT DEFAULT '',
+      knowledge_gaps TEXT DEFAULT '',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES ai_sessions(id),
+      FOREIGN KEY (target_id) REFERENCES chat_targets(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_evaluations_session ON chat_evaluations(session_id);
+    CREATE INDEX IF NOT EXISTS idx_evaluations_target ON chat_evaluations(target_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS chat_diagnoses (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      attitude_level TEXT NOT NULL,
+      language_pattern TEXT DEFAULT '',
+      emotion_type TEXT DEFAULT '',
+      emotion_valence TEXT DEFAULT '',
+      stage TEXT DEFAULT '',
+      upgrade_ready INTEGER DEFAULT 0,
+      upgrade_reason TEXT DEFAULT '',
+      warnings_json TEXT DEFAULT '[]',
+      action TEXT DEFAULT '',
+      strategy TEXT DEFAULT '',
+      knowledge_ids TEXT DEFAULT '',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES ai_sessions(id),
+      FOREIGN KEY (target_id) REFERENCES chat_targets(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_diagnoses_session ON chat_diagnoses(session_id);
+    CREATE INDEX IF NOT EXISTS idx_diagnoses_target ON chat_diagnoses(target_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS user_warnings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      warning_type TEXT NOT NULL,
+      detail TEXT DEFAULT '',
+      count INTEGER DEFAULT 1,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (target_id) REFERENCES chat_targets(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_warnings_user_target ON user_warnings(user_id, target_id, warning_type);
+  `);
+
   dbReady = true;
 }
 
