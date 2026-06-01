@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
-import { buildSystemPrompt, buildQuickPrompt, buildAdvisorPrompt, buildReviewPrompt } from './prompt';
+import { buildAdvisorPrompt, buildReviewPrompt, buildFullMessages, buildQuickMessages } from './prompt';
 import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
 import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
@@ -385,16 +385,15 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       .map((f: any) => `用户对${f.strategy}策略反馈${f.rating === 'thumbs_up' ? '👍' : '👎'}`)
       .join('；');
 
-    // Build system prompt
+    // Build prompt params
     const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: feedbackPrefs } as any;
-    const systemPrompt = isQuick
-      ? buildQuickPrompt({ ...promptParams, contextSummary: session.context_summary || '' })
-      : buildSystemPrompt(promptParams);
 
-    // Build conversation messages for AI
-    const conversationMessages: Array<{ role: string; content: string }> = [
-      { role: 'system', content: systemPrompt },
-    ];
+    // 拆分版：静态 system（可被 API 缓存）+ 动态 system（每次变化）
+    const baseMessages = isQuick
+      ? buildQuickMessages({ ...promptParams, contextSummary: session.context_summary || '' })
+      : buildFullMessages(promptParams);
+
+    const conversationMessages: Array<{ role: string; content: string }> = [...baseMessages];
     if (!isQuick) {
       for (const aiMsg of aiMessages as any[]) {
         conversationMessages.push({ role: aiMsg.role as string, content: aiMsg.content as string });
@@ -601,34 +600,61 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(uuid(), session.id, 'user', JSON.stringify({ type: 'regenerate', preferredStrategy }), roundId, nextVersion, Date.now());
 
-    // Re-run generate logic (simplified: redirect to generate with last her message)
+    // Re-run generate logic with last her message
     const lastHerMsg = db.prepare(`SELECT * FROM chat_messages WHERE target_id = ? AND role = 'her' ORDER BY created_at DESC LIMIT 1`)
       .get(session.target_id) as any;
     if (!lastHerMsg) { res.status(400).json({ error: '没有对方消息' }); return; }
 
-    // Just re-call the same logic
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ?').get(session.target_id) as any;
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(session.target_id).reverse();
     const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at ASC').all(session.id);
 
     const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' } as any;
-    const systemPrompt = isQuick
-      ? buildQuickPrompt({ ...promptParams, contextSummary: session.context_summary || '' })
-      : buildSystemPrompt(promptParams);
-    const conversationMessages: Array<{ role: string; content: string }> = [{ role: 'system', content: systemPrompt }];
+
+    // 拆分版 messages（静态 + 动态），复用 generate 的优化逻辑
+    const baseMessages = isQuick
+      ? buildQuickMessages({ ...promptParams, contextSummary: session.context_summary || '' })
+      : buildFullMessages(promptParams);
+    const conversationMessages: Array<{ role: string; content: string }> = [...baseMessages];
     if (!isQuick) {
       for (const aiMsg of aiMessages as any[]) { conversationMessages.push({ role: aiMsg.role as string, content: aiMsg.content as string }); }
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${lastHerMsg.text}` });
 
+    // === 流式 SSE 输出（与 generate 一致） ===
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+
+    if (!isQuick) send('step', { step: 'analyze' });
+    send('step', { step: 'generating' });
+
+    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
+
     let raw = '';
-    if (isQuick) {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 2048)) {
+    let sentReplyCount = 0;
+    try {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 2048 : 4096)) {
         raw += delta;
+        send('delta', { text: delta });
+
+        // Quick mode: progressively detect and send complete replies
+        if (isQuick) {
+          const newReplies = extractNewReplies(raw, sentReplyCount);
+          for (const r of newReplies) {
+            const reply = r.s !== undefined
+              ? { id: sentReplyCount + 1, strategy: r.s || '安全回复', text: r.t || '', reason: '' }
+              : r;
+            send('reply_ready', { reply, index: sentReplyCount });
+            sentReplyCount++;
+          }
+        }
       }
-    } else {
-      raw = await chatCompletion(conversationMessages, provider || 'zhipu');
+    } finally {
+      clearInterval(heartbeatTimer);
     }
+
+    if (!isQuick) send('step', { step: 'parsing' });
+
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
       console.error('[Regen Parse Error] All fallback attempts failed. Raw:', raw.slice(0, 500));
@@ -652,12 +678,20 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       };
     }
 
+    // Send structured events — normal mode sends analysis/plan/replies; quick mode already sent reply_ready during streaming
+    if (!isQuick) {
+      if (parsed.analysis) send('analysis', parsed.analysis);
+      if (parsed.plan) send('plan', parsed.plan);
+      send('replies', parsed.replies || []);
+    }
+
+    // Save to DB
+    const totalText = conversationMessages.map(m => m.content).join('');
+    const estimatedTokens = Math.ceil(Buffer.byteLength(totalText, 'utf-8') / 2);
+
     db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(uuid(), session.id, 'assistant', JSON.stringify(parsed), roundId, nextVersion, Date.now());
 
-    const totalText = conversationMessages.map(m => m.content).join('');
-    const estimatedTokens = Math.ceil(totalText.length * 2);
-    // Quick mode: also save context_summary; normal mode: original SQL
     if (isQuick) {
       db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ?, context_summary = ? WHERE id = ?')
         .run(estimatedTokens, quickCtx || session.context_summary, session.id);
@@ -666,16 +700,16 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
         .run(estimatedTokens, session.id);
     }
 
-    res.json({
-      analysis: parsed.analysis,
-      plan: parsed.plan || { goal: session.plan_goal, nextStep: session.plan_next_step },
-      contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) },
-      replies: parsed.replies || [],
-      roundId,
-      version: nextVersion,
-    });
+    send('done', { contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) }, roundId, version: nextVersion });
+    res.end();
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'AI 服务异常' });
+    console.error('Regenerate error:', err);
+    try {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
+      res.end();
+    } catch {
+      // connection already closed
+    }
   }
 });
 

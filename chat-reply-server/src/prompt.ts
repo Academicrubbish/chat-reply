@@ -44,6 +44,67 @@ interface ReviewPromptParams {
   replySelections: Array<{ reply_text: string; strategy: string | null }>;
 }
 
+// ============ 静态 Prompt 缓存 ============
+// 知识体系 + 红线在部署后不变，启动时预计算，避免每次请求重新格式化
+
+const staticPromptCache: Record<string, string> = {};
+
+function getCachedStaticPrompt(mode: 'full' | 'quick'): string {
+  const key = `static_${mode}`;
+  if (!staticPromptCache[key]) {
+    const units = getUnitsForMode(mode);
+    if (mode === 'quick') {
+      // Quick mode: 精简为查表格式
+      const lines: string[] = ['## 快速参考'];
+      for (const u of units) {
+        lines.push(`**${u.id} ${u.title}**：${u.interpretation.split('\n')[0]}`);
+        const trigger = u.triggers.find(t => t.modes.includes('quick'));
+        if (trigger && trigger.languageSignals.length > 0) {
+          lines.push(`  信号：${trigger.languageSignals.join('、')}`);
+        }
+        if (u.execution.length > 0) {
+          lines.push(`  操作：${u.execution.slice(0, 2).map(s => s.action).join(' → ')}`);
+        }
+      }
+      staticPromptCache[key] = lines.join('\n');
+    } else {
+      // Full mode: 完整知识体系
+      staticPromptCache[key] = formatKnowledgeSection(units, mode);
+    }
+  }
+  return staticPromptCache[key];
+}
+
+/** 获取 full mode 的静态前缀（角色定义 + 知识体系 + 红线），用于 API Prompt Caching */
+export function getFullStaticPrefix(): string {
+  return `你是一个专业的社交聊天辅导AI，帮助用户分析对方消息并生成回复建议。你的核心方法论来自《魔鬼约会学》，严格按照以下知识体系运作。
+
+# 知识体系
+
+${getCachedStaticPrompt('full')}
+
+# 红线禁忌
+
+1. 对方明确拒绝时不得死缠烂打
+2. 对方情绪不好（真生气/难过）时不使用扩大冲突
+3. 不得生成涉及骚扰、强迫、不尊重的回复
+4. 所有进攻型技巧的前提是对方的正面回应，没有正面回应就不能升级
+5. 不要生成过于"油腻"或套路感过强的回复
+6. 用表达自己来代替评价对方（安全法则）`;
+}
+
+/** 获取 quick mode 的静态前缀（角色 + 精简知识 + 红线），用于 API Prompt Caching */
+export function getQuickStaticPrefix(): string {
+  return `你是社交聊天回复器。根据对方最新消息，快速生成3条回复。
+
+${getCachedStaticPrompt('quick')}
+
+## 红线
+- 对方真生气→不用扩大冲突，改用共情
+- 不生成油腻/套路感强的回复
+- 遵守话题禁区`;
+}
+
 // ============ 工具函数 ============
 
 const toneMapFull: Record<string, string> = {
@@ -227,6 +288,75 @@ ${feedback}
 - 基于历史反馈调整策略权重
 - 只返回JSON`;
 }
+
+// ============ 拆分版 Prompt 构建函数（用于 API Prompt Caching） ============
+
+/** 构建动态上下文（每次请求变化的部分），作为第二条 system message */
+export function buildFullDynamicContext(params: PromptParams): string {
+  const { target, recentMessages, planGoal, planNextStep, feedbackPreferences } = params;
+  const chatHistory = formatChatHistory(recentMessages);
+  const context = buildContextBlock(target, chatHistory, {
+    '语气偏好': toneMapFull[target.tone_level] || '适中',
+    '目标意图': goalMap[target.goal_intent] || '正在追求对方',
+    '话题禁区': target.forbidden_topics || '无',
+    '当前目标': planGoal || '探索阶段，建立舒适感',
+    '下一步建议': planNextStep || '自然对话，寻找共同话题',
+  });
+  const feedback = feedbackPreferences ? `\n## 历史反馈偏好\n${feedbackPreferences}\n` : '';
+  return `${context}
+${feedback}# 输出要求
+
+分析对方最新消息，返回JSON：
+{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+
+要求：
+- 生成3-4条回复，风格各异，至少1条安全回复
+- 回复口语化自然，长度与对方发言匹配
+- 每条标注策略名、理由和对应的知识单元ID
+- 遵守语气偏好和话题禁区
+- 基于历史反馈调整策略权重
+- 只返回JSON`;
+}
+
+/** 构建拆分版的 full mode messages 数组（静态 + 动态分离） */
+export function buildFullMessages(params: PromptParams): Array<{ role: string; content: string }> {
+  return [
+    { role: 'system', content: getFullStaticPrefix() },
+    { role: 'system', content: buildFullDynamicContext(params) },
+  ];
+}
+
+/** 构建拆分版的 quick mode messages 数组（静态 + 动态分离） */
+export function buildQuickMessages(params: PromptParams): Array<{ role: string; content: string }> {
+  const { target, recentMessages, feedbackPreferences, contextSummary } = params;
+  const chatHistory = formatChatHistory(recentMessages, 4);
+  const dynamicContext = `## 对方信息
+名字：${target.name}
+语气风格：${toneMapQuick[target.tone_level] || '温和适中'}${target.forbidden_topics ? `\n话题禁区：${target.forbidden_topics}` : ''}
+
+${contextSummary ? `## 对话摘要\n${contextSummary}\n` : ''}${feedbackPreferences ? `## 用户偏好\n${feedbackPreferences}\n` : ''}
+## 最近聊天
+${chatHistory || '（暂无）'}
+
+## 输出要求
+严格返回JSON（短键名，不要多余字段）：
+{"signal":"信号类型","fav":0-100,"ctx":"50字以内的对话摘要，概括关系阶段、对方态度、近期话题，供下次快速回忆","replies":[{"s":"策略名","t":"回复文本","kid":"知识单元ID"},{"s":"策略名","t":"回复文本","kid":"知识单元ID"},{"s":"策略名","t":"回复文本","kid":"知识单元ID"}]}
+
+要求：
+- signal可选值：正面冲突、正面无冲突、模糊、负面
+- fav是好感度0-100数字
+- ctx必须填写，50字以内
+- 3条回复风格各不同，至少覆盖2种策略
+- 回复口语化自然，长度与对方发言匹配
+- 只返回JSON`;
+
+  return [
+    { role: 'system', content: getQuickStaticPrefix() },
+    { role: 'system', content: dynamicContext },
+  ];
+}
+
+// ============ 原有完整版 Quick Prompt（保持向后兼容） ============
 
 export function buildQuickPrompt(params: PromptParams): string {
   const { target, recentMessages, feedbackPreferences, contextSummary } = params;

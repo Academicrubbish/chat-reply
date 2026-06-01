@@ -160,6 +160,57 @@ export const regenerate = (sessionId: string, opts?: { preferredStrategy?: strin
     body: JSON.stringify(opts ?? {}),
   });
 
+export function regenerateStream(
+  sessionId: string,
+  opts: { preferredStrategy?: string; mode?: string; provider?: string; roundId?: string } = {},
+  onEvent: (evt: SSEEvent) => void,
+  onError?: (err: Error) => void,
+): AbortController {
+  const ctrl = new AbortController();
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  fetch(`${BASE}/sessions/${sessionId}/regenerate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(opts),
+    signal: ctrl.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      onError?.(new Error(body.error || `请求失败 (${res.status})`));
+      return;
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      let currentEvent = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            onEvent({ event: currentEvent, data });
+          } catch {
+            // skip
+          }
+        }
+      }
+    }
+  }).catch(err => {
+    if (err.name !== 'AbortError') onError?.(err);
+  });
+  return ctrl;
+}
+
 export const getReplySelections = (sessionId: string) =>
   request<ReplySelection[]>(`/sessions/${sessionId}/selections`);
 
