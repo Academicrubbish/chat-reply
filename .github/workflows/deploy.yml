@@ -1,0 +1,62 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # ====== 前端打包 ======
+      - name: Install frontend dependencies
+        run: cd chat-reply-trainer && npm ci
+
+      - name: Build frontend
+        run: cd chat-reply-trainer && npm run build
+
+      # ====== 后端准备 ======
+      - name: Install backend dependencies
+        run: cd chat-reply-server && npm ci --production
+
+      # ====== 部署到服务器 ======
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy frontend
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            chat-reply-trainer/dist/ \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.DEPLOY_FRONTEND_PATH }}/
+
+      - name: Deploy backend
+        run: |
+          rsync -avz --delete \
+            --exclude='data/' \
+            --exclude='.env' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            chat-reply-server/src/ \
+            chat-reply-server/package.json \
+            chat-reply-server/package-lock.json \
+            chat-reply-server/node_modules/ \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.DEPLOY_BACKEND_PATH }}/
+
+      - name: Restart backend service
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+            "cd ${{ secrets.DEPLOY_BACKEND_PATH }} && npm install --production && pm2 restart chat-reply || pm2 start npx --name chat-reply -- tsx src/index.ts && pm2 save"

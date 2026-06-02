@@ -50,14 +50,6 @@ function tryParseLine(line: string): { role: 'her' | 'me' | 'scene'; text: strin
   return null;
 }
 
-function isWeChatExportFormat(lines: string[]): boolean {
-  // Heuristic: contains date separator lines or multiple WECHAT_HEADER matches
-  const hasDateSep = lines.some(l => DATE_SEPARATOR.test(l.trim()));
-  if (hasDateSep) return true;
-  const headerCount = lines.filter(l => WECHAT_HEADER.test(l.trim())).length;
-  return headerCount >= 3;
-}
-
 function parseWeChatExport(lines: string[], nicknameMap?: NicknameMap): ParseResult {
   const warnings: string[] = [];
   const nicknameOrder: string[] = [];
