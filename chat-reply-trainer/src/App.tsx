@@ -73,7 +73,7 @@ function AppContent() {
 
       // Parse and import chat messages from recent_chats
       if (data.recent_chats?.trim()) {
-        const { messages } = parseChatWithMeta(data.recent_chats, data.name);
+        const { messages } = parseChatWithMeta(data.recent_chats, data.name, data.nicknameMap);
         for (const msg of messages) {
           await api.addMessage(target.id, {
             role: msg.role,

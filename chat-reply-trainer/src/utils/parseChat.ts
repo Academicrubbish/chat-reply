@@ -3,9 +3,15 @@ export interface ParsedMessage {
   text: string;
 }
 
+export interface NicknameMap {
+  herNick: string;
+  meNick: string;
+}
+
 export interface ParseResult {
   messages: ParsedMessage[];
   warnings: string[];
+  nicknames?: string[];
 }
 
 // Format 1: 她/他：xxx / 我：xxx (fullwidth or halfwidth colon)
@@ -17,8 +23,12 @@ const FORMAT3 = /^(她|他|我)\s*>\s*(.*)$/;
 // Scene format: 场景：xxx / 【场景】xxx
 const FORMAT_SCENE = /^场景[：:]\s*(.*)$/;
 const FORMAT_SCENE_BRACKET = /^【场景】\s*(.*)$/;
-// WeChat export header: 昵称 HH:MM or HH:MM:SS
+// WeChat export header: 昵称（备注名） HH:MM or 昵称 HH:MM
 const WECHAT_HEADER = /^(.+?)\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$/;
+// WeChat export noise lines to skip
+const WECHAT_SKIP = /^(【|—————|.*聊天记录如下)/;
+// Date separator: ————— YYYY-MM-DD —————
+const DATE_SEPARATOR = /^—————/;
 
 const ALL_FORMATS = [FORMAT1, FORMAT2, FORMAT3];
 
@@ -40,77 +50,80 @@ function tryParseLine(line: string): { role: 'her' | 'me' | 'scene'; text: strin
   return null;
 }
 
-function parseWeChatExport(lines: string[], herName?: string): ParseResult {
-  const messages: ParsedMessage[] = [];
+function isWeChatExportFormat(lines: string[]): boolean {
+  // Heuristic: contains date separator lines or multiple WECHAT_HEADER matches
+  const hasDateSep = lines.some(l => DATE_SEPARATOR.test(l.trim()));
+  if (hasDateSep) return true;
+  const headerCount = lines.filter(l => WECHAT_HEADER.test(l.trim())).length;
+  return headerCount >= 3;
+}
+
+function parseWeChatExport(lines: string[], nicknameMap?: NicknameMap): ParseResult {
   const warnings: string[] = [];
   const nicknameOrder: string[] = [];
   const seen = new Set<string>();
 
-  // Collect all header nicknames
-  const headers: { nickname: string; lineIdx: number }[] = [];
+  // Phase 1: collect all valid message headers, skipping noise
+  const entries: { nickname: string; textLines: string[] }[] = [];
+
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(WECHAT_HEADER);
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (DATE_SEPARATOR.test(line)) continue;
+    if (WECHAT_SKIP.test(line)) continue;
+
+    const m = line.match(WECHAT_HEADER);
     if (m) {
       const nick = m[1].trim();
-      headers.push({ nickname: nick, lineIdx: i });
+      // Skip if nickname looks like a system label
+      if (/^(Dear|聊天记录)$/.test(nick)) continue;
+
+      entries.push({ nickname: nick, textLines: [] });
       if (!seen.has(nick)) {
         seen.add(nick);
         nicknameOrder.push(nick);
       }
+    } else if (entries.length > 0) {
+      // Content line: append to the last header entry
+      entries[entries.length - 1].textLines.push(line);
     }
+    // Lines before any header are skipped silently
   }
 
-  if (headers.length === 0) {
-    return { messages: [], warnings: ['未识别到微信导出格式的消息头'] };
+  if (entries.length === 0) {
+    return { messages: [], warnings: ['未识别到微信导出格式的消息头'], nicknames: [] };
   }
 
-  // Determine her/me mapping
-  let herNick: string;
-  let meNick: string;
-
-  if (nicknameOrder.length === 1) {
-    herNick = nicknameOrder[0];
-    meNick = nicknameOrder[0];
-    warnings.push('仅识别到一个昵称，所有消息将归为"她"');
-  } else if (herName && nicknameOrder.includes(herName)) {
-    herNick = herName;
-    meNick = nicknameOrder.find(n => n !== herName) || nicknameOrder[0];
-  } else {
-    herNick = nicknameOrder[0];
-    meNick = nicknameOrder[1];
-    if (nicknameOrder.length > 2) {
-      warnings.push(`识别到 ${nicknameOrder.length} 个昵称，前两个为「${herNick}」「${meNick}」，其余已忽略`);
-    }
+  // Phase 2: if no nicknameMap provided, just return nicknames for UI selection
+  if (!nicknameMap) {
+    return { messages: [], warnings: [], nicknames: nicknameOrder };
   }
+
+  // Phase 3: map nicknames to roles and generate messages
+  const { herNick, meNick } = nicknameMap;
 
   const nickToRole = (nick: string): 'her' | 'me' => {
     if (nick === herNick) return 'her';
     if (nick === meNick) return 'me';
-    return 'her';
+    return 'her'; // default for other participants
   };
 
-  let currentMsg: ParsedMessage | null = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-
-    const headerMatch = line.match(WECHAT_HEADER);
-    if (headerMatch) {
-      const nick = headerMatch[1].trim();
-      currentMsg = { role: nickToRole(nick), text: '' };
-      messages.push(currentMsg);
-    } else if (currentMsg) {
-      currentMsg.text = currentMsg.text ? currentMsg.text + '\n' + line : line;
-    }
+  const messages: ParsedMessage[] = [];
+  for (const entry of entries) {
+    const text = entry.textLines.join('\n').trim();
+    if (!text) continue;
+    messages.push({ role: nickToRole(entry.nickname), text });
   }
 
-  // Filter empty
-  const filtered = messages.filter(m => m.text.trim());
-  return { messages: filtered, warnings };
+  if (nicknameOrder.length > 2) {
+    const otherNicks = nicknameOrder.filter(n => n !== herNick && n !== meNick);
+    warnings.push(`群聊中有 ${nicknameOrder.length} 人，已将「${otherNicks.join('、')}」的消息归为"她"`);
+  }
+
+  return { messages, warnings };
 }
 
-export function parseChatWithMeta(raw: string, herName?: string): ParseResult {
+export function parseChatWithMeta(raw: string, _herName?: string, nicknameMap?: NicknameMap): ParseResult {
   if (!raw?.trim()) return { messages: [], warnings: [] };
 
   const lines = raw.split('\n').map(l => l.trimEnd());
@@ -123,7 +136,7 @@ export function parseChatWithMeta(raw: string, herName?: string): ParseResult {
 
   if (!hasSpeakerPrefix) {
     // Try WeChat export mode
-    return parseWeChatExport(lines, herName);
+    return parseWeChatExport(lines, nicknameMap);
   }
 
   // Mixed / speaker-prefix mode

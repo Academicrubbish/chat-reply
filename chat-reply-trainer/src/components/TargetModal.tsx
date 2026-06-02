@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
-import { Modal, Form, Input, Radio, Space, Row, Col, Card, Alert, Typography } from 'antd';
+import { Modal, Form, Input, Radio, Space, Row, Col, Card, Alert, Typography, Select, Button } from 'antd';
+import { WechatOutlined } from '@ant-design/icons';
 import type { ChatTarget } from '../types';
 import { parseChatWithMeta } from '../utils/parseChat';
-import type { ParseResult } from '../utils/parseChat';
+import type { ParseResult, NicknameMap } from '../utils/parseChat';
 
 interface TargetModalProps {
   open: boolean;
@@ -28,6 +29,11 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
   const [parsedResult, setParsedResult] = useState<ParseResult | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // WeChat nickname mapping state
+  const [wechatNicknames, setWechatNicknames] = useState<string[]>([]);
+  const [herNickname, setHerNickname] = useState<string>('');
+  const [meNickname, setMeNickname] = useState<string>('');
+
   const rawChatText = Form.useWatch('recent_chats', form);
   const nameValue = Form.useWatch('name', form);
 
@@ -46,6 +52,9 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
     } else if (open) {
       form.resetFields();
       setParsedResult(null);
+      setWechatNicknames([]);
+      setHerNickname('');
+      setMeNickname('');
     }
   }, [open, target, form]);
 
@@ -53,19 +62,53 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       if (rawChatText?.trim()) {
-        setParsedResult(parseChatWithMeta(rawChatText, nameValue));
+        const result = parseChatWithMeta(rawChatText, nameValue);
+        setParsedResult(result);
+
+        // Detect WeChat format
+        if (result.nicknames && result.nicknames.length >= 2 && result.messages.length === 0) {
+          setWechatNicknames(result.nicknames);
+          // Auto-select: use nameValue to match her nickname
+          const matched = result.nicknames.find(n =>
+            nameValue && n.includes(nameValue)
+          );
+          if (matched) {
+            setHerNickname(matched);
+            setMeNickname(result.nicknames.find(n => n !== matched) || '');
+          } else {
+            setHerNickname(result.nicknames[0]);
+            setMeNickname(result.nicknames[1]);
+          }
+        } else {
+          setWechatNicknames([]);
+        }
       } else {
         setParsedResult(null);
+        setWechatNicknames([]);
       }
     }, 300);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [rawChatText, nameValue]);
 
+  const handleNicknameConfirm = () => {
+    if (!herNickname || !meNickname || !rawChatText?.trim()) return;
+    const map: NicknameMap = { herNick: herNickname, meNick: meNickname };
+    const result = parseChatWithMeta(rawChatText, nameValue, map);
+    setParsedResult(result);
+  };
+
   function handleOk() {
     form.validateFields().then(values => {
-      onSave(values);
+      // Attach nicknameMap for WeChat format
+      const data: any = { ...values };
+      if (wechatNicknames.length >= 2 && herNickname && meNickname) {
+        data.nicknameMap = { herNick: herNickname, meNick: meNickname };
+      }
+      onSave(data);
     });
   }
+
+  const showNicknamePicker = wechatNicknames.length >= 2;
 
   const msgCount = parsedResult?.messages.length ?? 0;
   const herCount = parsedResult?.messages.filter(m => m.role === 'her').length ?? 0;
@@ -80,7 +123,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
       okText="保存"
       cancelText="取消"
       width={960}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form
         form={form}
@@ -139,8 +182,61 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
             </Form.Item>
 
             <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: -8, marginBottom: 12 }}>
-              支持格式：她：xxx / 我：xxx / 【她】xxx / 【我】xxx / 她 &gt; xxx / 我 &gt; xxx / 他：xxx / 【他】xxx / 他 &gt; xxx（混合使用也可）
+              支持格式：她：xxx / 我：xxx / 【她】xxx / 【我】xxx / 微信聊天记录导出
             </Typography.Text>
+
+            <Alert
+              type="info"
+              showIcon
+              style={{ fontSize: 11, marginBottom: 12, padding: '6px 10px' }}
+              message={
+                <span>
+                  <b>微信记录导入：</b>在微信中长按消息 → 多选 → 选择最右侧邮件转发 → 进入发送页 → 长按该条邮件 → 全选复制 → 粘贴到此处。（无需发送真实邮件）
+                  系统会自动识别参与者，你只需选择谁是「她」谁是「我」即可。
+                </span>
+              }
+            />
+
+            {/* WeChat nickname picker */}
+            {showNicknamePicker && (
+              <div style={{
+                marginBottom: 12, padding: '8px 10px',
+                background: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 6,
+              }}>
+                <div style={{ fontSize: 11, color: '#096dd9', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <WechatOutlined /> 检测到微信导出格式，共 {wechatNicknames.length} 位参与者，请选择角色映射：
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: '#f48fb1', fontWeight: 500 }}>她：</span>
+                    <Select
+                      size="small"
+                      value={herNickname}
+                      onChange={setHerNickname}
+                      style={{ minWidth: 140 }}
+                      options={wechatNicknames.map(n => ({ label: n, value: n }))}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: '#66bb6a', fontWeight: 500 }}>我：</span>
+                    <Select
+                      size="small"
+                      value={meNickname}
+                      onChange={setMeNickname}
+                      style={{ minWidth: 140 }}
+                      options={wechatNicknames.map(n => ({ label: n, value: n }))}
+                    />
+                  </div>
+                  <Button size="small" type="primary" onClick={handleNicknameConfirm}
+                    disabled={!herNickname || !meNickname || herNickname === meNickname}>
+                    确认
+                  </Button>
+                </div>
+                {herNickname === meNickname && herNickname && (
+                  <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 4 }}>「她」和「我」不能选同一个人</div>
+                )}
+              </div>
+            )}
 
             {parsedResult && msgCount > 0 && (
               <Card

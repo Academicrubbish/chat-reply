@@ -1,8 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Empty, Button, Input, Space } from 'antd';
-import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { Empty, Button, Input, Space, Select, Alert } from 'antd';
+import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined, WechatOutlined } from '@ant-design/icons';
 import type { ChatMessage } from '../types';
-import type { ParsedMessage } from '../utils/parseChat';
+import type { ParsedMessage, NicknameMap } from '../utils/parseChat';
 import { parseChatWithMeta } from '../utils/parseChat';
 import ChatBubble from './ChatBubble';
 
@@ -29,9 +29,23 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // WeChat nickname mapping state
+  const [wechatNicknames, setWechatNicknames] = useState<string[]>([]);
+  const [herNickname, setHerNickname] = useState<string>('');
+  const [meNickname, setMeNickname] = useState<string>('');
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const resetImportState = () => {
+    setImportText('');
+    setParsedPreview([]);
+    setParseWarnings([]);
+    setWechatNicknames([]);
+    setHerNickname('');
+    setMeNickname('');
+  };
 
   const handleSceneSubmit = async () => {
     const trimmed = sceneText.trim();
@@ -47,9 +61,27 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   };
 
   const handleParseImport = () => {
-    const { messages: parsed, warnings } = parseChatWithMeta(importText, targetName);
-    setParsedPreview(parsed);
-    setParseWarnings(warnings);
+    const result = parseChatWithMeta(importText);
+    setParsedPreview(result.messages);
+    setParseWarnings(result.warnings);
+
+    // If WeChat format detected with nicknames, show mapping UI
+    if (result.nicknames && result.nicknames.length >= 2) {
+      setWechatNicknames(result.nicknames);
+      setHerNickname(result.nicknames[0]);
+      setMeNickname(result.nicknames[1]);
+      setParsedPreview([]); // Don't show preview until mapping is confirmed
+    } else {
+      setWechatNicknames([]);
+    }
+  };
+
+  const handleNicknameConfirm = () => {
+    if (!herNickname || !meNickname) return;
+    const map: NicknameMap = { herNick: herNickname, meNick: meNickname };
+    const result = parseChatWithMeta(importText, targetName, map);
+    setParsedPreview(result.messages);
+    setParseWarnings(result.warnings);
   };
 
   const handleConfirmImport = async () => {
@@ -57,9 +89,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     setSubmitting(true);
     try {
       await onImportMessages(parsedPreview);
-      setImportText('');
-      setParsedPreview([]);
-      setParseWarnings([]);
+      resetImportState();
       setInsertMode('none');
     } finally {
       setSubmitting(false);
@@ -69,10 +99,11 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const cancelInsert = () => {
     setInsertMode('none');
     setSceneText('');
-    setImportText('');
-    setParsedPreview([]);
-    setParseWarnings([]);
+    resetImportState();
   };
+
+  // WeChat nickname is being selected
+  const showNicknamePicker = wechatNicknames.length >= 2 && parsedPreview.length === 0;
 
   return (
     <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5">
@@ -121,15 +152,68 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 8,
         }}>
           <div style={{ fontSize: 11, color: '#389e0d', marginBottom: 4 }}>
-            <FileAddOutlined /> 粘贴聊天记录，支持：她：xxx / 我：xxx / 场景：xxx
+            <FileAddOutlined /> 粘贴聊天记录，支持：她：xxx / 我：xxx / 场景：xxx / 微信聊天记录导出
           </div>
           <Input.TextArea
             value={importText}
-            onChange={e => { setImportText(e.target.value); setParsedPreview([]); setParseWarnings([]); }}
+            onChange={e => { setImportText(e.target.value); setParsedPreview([]); setParseWarnings([]); setWechatNicknames([]); }}
             autoSize={{ minRows: 3, maxRows: 8 }}
             placeholder="粘贴聊天记录..."
             autoFocus
           />
+          <Alert
+            type="info"
+            showIcon
+            style={{ fontSize: 11, marginTop: 6, padding: '6px 10px' }}
+            message={
+              <span>
+                <b>微信记录导入：</b>在微信中长按消息 → 多选 → 选择最右侧邮件转发 → 进入发送页 → 长按该条邮件 → 全选复制 → 粘贴到此处。（无需发送真实邮件）
+                系统会自动识别参与者，你只需选择谁是「她」谁是「我」即可。
+              </span>
+            }
+          />
+
+          {/* WeChat nickname picker */}
+          {showNicknamePicker && (
+            <div style={{
+              marginTop: 8, padding: '8px 10px',
+              background: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 6,
+            }}>
+              <div style={{ fontSize: 11, color: '#096dd9', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <WechatOutlined /> 检测到微信导出格式，共 {wechatNicknames.length} 位参与者，请选择角色映射：
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#f48fb1', fontWeight: 500 }}>她：</span>
+                  <Select
+                    size="small"
+                    value={herNickname}
+                    onChange={setHerNickname}
+                    style={{ minWidth: 120 }}
+                    options={wechatNicknames.map(n => ({ label: n, value: n }))}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#66bb6a', fontWeight: 500 }}>我：</span>
+                  <Select
+                    size="small"
+                    value={meNickname}
+                    onChange={setMeNickname}
+                    style={{ minWidth: 120 }}
+                    options={wechatNicknames.map(n => ({ label: n, value: n }))}
+                  />
+                </div>
+                <Button size="small" type="primary" onClick={handleNicknameConfirm}
+                  disabled={!herNickname || !meNickname || herNickname === meNickname}>
+                  确认
+                </Button>
+              </div>
+              {herNickname === meNickname && herNickname && (
+                <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 4 }}>「她」和「我」不能选同一个人</div>
+              )}
+            </div>
+          )}
+
           {parsedPreview.length > 0 && (
             <div style={{ marginTop: 6, maxHeight: 120, overflowY: 'auto', fontSize: 11, lineHeight: 1.6 }}>
               {parsedPreview.map((m, i) => (
@@ -147,16 +231,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           )}
           <Space size={4} style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end' }}>
             <Button size="small" icon={<CloseOutlined />} onClick={cancelInsert}>取消</Button>
-            {parsedPreview.length === 0 ? (
+            {parsedPreview.length === 0 && !showNicknamePicker ? (
               <Button size="small" type="primary" onClick={handleParseImport} disabled={!importText.trim()}>
                 预览
               </Button>
-            ) : (
+            ) : parsedPreview.length > 0 ? (
               <Button size="small" type="primary" icon={<CheckOutlined />}
                 loading={submitting} onClick={handleConfirmImport}>
                 确认导入 ({parsedPreview.length}条)
               </Button>
-            )}
+            ) : null}
           </Space>
         </div>
       )}
