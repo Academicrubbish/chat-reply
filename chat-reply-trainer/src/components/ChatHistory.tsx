@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Empty, Button, Input, Space, Select, Alert } from 'antd';
-import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined, WechatOutlined } from '@ant-design/icons';
+import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined, WechatOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ChatMessage } from '../types';
 import type { ParsedMessage, NicknameMap } from '../utils/parseChat';
 import { parseChatWithMeta } from '../utils/parseChat';
@@ -29,6 +29,10 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // Inline scene insert in preview
+  const [insertSceneIndex, setInsertSceneIndex] = useState<number | null>(null);
+  const [insertSceneText, setInsertSceneText] = useState('');
+
   // WeChat nickname mapping state
   const [wechatNicknames, setWechatNicknames] = useState<string[]>([]);
   const [herNickname, setHerNickname] = useState<string>('');
@@ -45,6 +49,18 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     setWechatNicknames([]);
     setHerNickname('');
     setMeNickname('');
+    setInsertSceneIndex(null);
+    setInsertSceneText('');
+  };
+
+  const handleInsertScene = (index: number) => {
+    const text = insertSceneText.trim();
+    if (!text) return;
+    const next = [...parsedPreview];
+    next.splice(index, 0, { role: 'scene', text });
+    setParsedPreview(next);
+    setInsertSceneIndex(null);
+    setInsertSceneText('');
   };
 
   const handleSceneSubmit = async () => {
@@ -152,13 +168,18 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 8,
         }}>
           <div style={{ fontSize: 11, color: '#389e0d', marginBottom: 4 }}>
-            <FileAddOutlined /> 粘贴聊天记录，支持：她：xxx / 我：xxx / 场景：xxx / 微信聊天记录导出
+            <FileAddOutlined /> 粘贴聊天记录，支持以下格式：
+          </div>
+          <div style={{ fontSize: 11, color: '#666', marginBottom: 4, paddingLeft: 14, lineHeight: 1.8 }}>
+            <div>• <span style={{ color: '#f48fb1' }}>她：xxx</span> / <span style={{ color: '#66bb6a' }}>我：xxx</span></div>
+            <div>• <span style={{ color: '#8c6d1f' }}>场景：xxx</span> ← 在对话中间插入背景说明</div>
+            <div>• 微信聊天记录导出（自动识别）</div>
           </div>
           <Input.TextArea
             value={importText}
             onChange={e => { setImportText(e.target.value); setParsedPreview([]); setParseWarnings([]); setWechatNicknames([]); }}
             autoSize={{ minRows: 3, maxRows: 8 }}
-            placeholder="粘贴聊天记录..."
+            placeholder={"她：你在干嘛\n我：在加班呢\n场景：过了两天没联系\n她：最近忙吗"}
             autoFocus
           />
           <Alert
@@ -215,11 +236,75 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           )}
 
           {parsedPreview.length > 0 && (
-            <div style={{ marginTop: 6, maxHeight: 120, overflowY: 'auto', fontSize: 11, lineHeight: 1.6 }}>
-              {parsedPreview.map((m, i) => (
-                <div key={i} style={{ color: m.role === 'scene' ? '#8c6d1f' : m.role === 'her' ? '#f48fb1' : '#66bb6a' }}>
-                  {m.role === 'scene' ? '📋' : m.role === 'her' ? '她' : '我'}：{m.text.slice(0, 50)}{m.text.length > 50 ? '...' : ''}
+            <div style={{ marginTop: 6, maxHeight: 180, overflowY: 'auto', fontSize: 11, lineHeight: 1.6 }}>
+              {/* Insert scene at the top */}
+              {insertSceneIndex === 0 ? (
+                <div style={{
+                  background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4,
+                  padding: '4px 6px', marginBottom: 2, display: 'flex', gap: 4, alignItems: 'center',
+                }}>
+                  <EnvironmentOutlined style={{ color: '#8c6d1f', fontSize: 10 }} />
+                  <Input
+                    size="small"
+                    value={insertSceneText}
+                    onChange={e => setInsertSceneText(e.target.value)}
+                    placeholder="输入场景描述..."
+                    style={{ flex: 1, fontSize: 11 }}
+                    autoFocus
+                    onPressEnter={() => handleInsertScene(0)}
+                  />
+                  <Button size="small" type="link" icon={<CheckOutlined />} style={{ fontSize: 10 }}
+                    onClick={() => handleInsertScene(0)} />
+                  <Button size="small" type="link" icon={<CloseOutlined />} style={{ fontSize: 10 }}
+                    onClick={() => { setInsertSceneIndex(null); setInsertSceneText(''); }} />
                 </div>
+              ) : (
+                <div
+                  style={{ textAlign: 'center', margin: '2px 0', opacity: 0.5 }}
+                  className="hover:opacity-100 cursor-pointer"
+                  onClick={() => setInsertSceneIndex(0)}
+                >
+                  <PlusOutlined style={{ fontSize: 10, color: '#8c6d1f' }} />
+                  <span style={{ fontSize: 10, color: '#8c6d1f', marginLeft: 2 }}>场景</span>
+                </div>
+              )}
+              {parsedPreview.map((m, i) => (
+                <React.Fragment key={i}>
+                  <div style={{ color: m.role === 'scene' ? '#8c6d1f' : m.role === 'her' ? '#f48fb1' : '#66bb6a' }}>
+                    {m.role === 'scene' ? '📋' : m.role === 'her' ? '她' : '我'}：{m.text.slice(0, 50)}{m.text.length > 50 ? '...' : ''}
+                  </div>
+                  {/* Insert scene between messages */}
+                  {insertSceneIndex === i + 1 ? (
+                    <div style={{
+                      background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4,
+                      padding: '4px 6px', margin: '2px 0', display: 'flex', gap: 4, alignItems: 'center',
+                    }}>
+                      <EnvironmentOutlined style={{ color: '#8c6d1f', fontSize: 10 }} />
+                      <Input
+                        size="small"
+                        value={insertSceneText}
+                        onChange={e => setInsertSceneText(e.target.value)}
+                        placeholder="输入场景描述..."
+                        style={{ flex: 1, fontSize: 11 }}
+                        autoFocus
+                        onPressEnter={() => handleInsertScene(i + 1)}
+                      />
+                      <Button size="small" type="link" icon={<CheckOutlined />} style={{ fontSize: 10 }}
+                        onClick={() => handleInsertScene(i + 1)} />
+                      <Button size="small" type="link" icon={<CloseOutlined />} style={{ fontSize: 10 }}
+                        onClick={() => { setInsertSceneIndex(null); setInsertSceneText(''); }} />
+                    </div>
+                  ) : (
+                    <div
+                      style={{ textAlign: 'center', margin: '2px 0', opacity: 0.5 }}
+                      className="hover:opacity-100 cursor-pointer"
+                      onClick={() => setInsertSceneIndex(i + 1)}
+                    >
+                      <PlusOutlined style={{ fontSize: 10, color: '#8c6d1f' }} />
+                      <span style={{ fontSize: 10, color: '#8c6d1f', marginLeft: 2 }}>场景</span>
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
               <div style={{ color: '#999', marginTop: 2 }}>共 {parsedPreview.length} 条</div>
             </div>
