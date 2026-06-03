@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Progress, Select, Tag, Tooltip, Popconfirm } from 'antd';
-import { EditOutlined, RobotOutlined, PlusOutlined, UnorderedListOutlined, DeleteOutlined, BulbOutlined, BarChartOutlined, HistoryOutlined, AimOutlined } from '@ant-design/icons';
+import { EditOutlined, RobotOutlined, PlusOutlined, UnorderedListOutlined, DeleteOutlined, BarChartOutlined, AimOutlined } from '@ant-design/icons';
 import type { ChatTarget, AISession, ModelOption, AnalysisData, GenerateMode, TargetDiagnosis } from '../types';
 
 const tagColorMap: Record<string, string> = {
@@ -48,7 +48,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   session, sessions, onSelectSession, onCreateSession, onDeleteSession,
   models = [], selectedProvider = 'zhipu', onSelectProvider,
   onTriggerAnalysis, onOpenAnalysisModal, isAnalyzing = false, analysisMode = null,
-  analysis, activeDiagnosis, isDiagnosing = false, onDiagnose,
+  analysis, activeDiagnosis, isDiagnosing = false,
 }) => {
   const currentIndex = session ? sessions.findIndex(s => s.id === session.id) : -1;
   const displayIndex = currentIndex >= 0 ? currentIndex + 1 : 0;

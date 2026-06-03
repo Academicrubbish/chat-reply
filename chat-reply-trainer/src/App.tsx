@@ -18,11 +18,11 @@ import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
-import AnalysisDrawer, { AnalysisSteps, AnalysisModal } from './components/AnalysisDrawer';
+import { AnalysisSteps, AnalysisModal } from './components/AnalysisDrawer';
 import { Card } from 'antd';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis, diagnoseTarget, clearDiagnosis } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis, diagnoseTarget } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
