@@ -33,6 +33,7 @@ interface ToolbarProps {
   // Analysis
   onTriggerAnalysis?: (mode: 'advisor' | 'review') => void;
   onOpenAnalysisModal?: () => void;
+  onOpenReviewModal?: () => void;
   isAnalyzing?: boolean;
   analysisMode?: 'advisor' | 'review' | null;
   // Context
@@ -47,7 +48,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   target, onEditTarget, onAIAssist, isGenerating, aiMode,
   session, sessions, onSelectSession, onCreateSession, onDeleteSession,
   models = [], selectedProvider = 'zhipu', onSelectProvider,
-  onTriggerAnalysis, onOpenAnalysisModal, isAnalyzing = false, analysisMode = null,
+  onTriggerAnalysis, onOpenAnalysisModal, onOpenReviewModal, isAnalyzing = false, analysisMode = null,
   analysis, activeDiagnosis, isDiagnosing = false, onDiagnose,
 }) => {
   const currentIndex = session ? sessions.findIndex(s => s.id === session.id) : -1;
@@ -139,25 +140,25 @@ const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         {onOpenAnalysisModal && (
-          <Tooltip title={activeDiagnosis ? `当前方案：${activeDiagnosis.stage} - ${activeDiagnosis.action}` : '查看或制定聊天方案'}>
+          <Tooltip title={isAnalyzing ? '分析进行中，点击查看进度' : activeDiagnosis ? `当前方案：${activeDiagnosis.stage} - ${activeDiagnosis.action}` : '查看或制定聊天方案'}>
             <Button size="small"
-              type={activeDiagnosis ? 'default' : 'primary'}
+              type={isAnalyzing ? 'default' : activeDiagnosis ? 'default' : 'primary'}
               icon={<AimOutlined />}
               loading={isDiagnosing}
+              disabled={isAnalyzing && !isDiagnosing}
               onClick={onOpenAnalysisModal}
             >
-              {activeDiagnosis ? '查看方案' : '制定方案'}
+              {isDiagnosing ? '诊断中...' : isAnalyzing ? '分析中...' : activeDiagnosis ? '查看方案' : '制定方案'}
             </Button>
           </Tooltip>
         )}
 
-        {onTriggerAnalysis && (
+        {onOpenReviewModal && (
           <Tooltip title="复盘聊天亮点与踩坑，帮助提升技巧">
             <Button size="small" icon={<BarChartOutlined />}
-              loading={isAnalyzing && analysisMode === 'review'}
-              disabled={isAnalyzing}
-              onClick={() => onTriggerAnalysis('review')}
-            >复盘</Button>
+              disabled={isDiagnosing || isAnalyzing}
+              onClick={onOpenReviewModal}
+            >{isAnalyzing && analysisMode === 'review' ? '复盘中...' : '复盘'}</Button>
           </Tooltip>
         )}
 

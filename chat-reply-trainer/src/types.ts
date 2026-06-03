@@ -209,6 +209,7 @@ export interface AppState {
   activeDiagnosis: TargetDiagnosis | null;
   isDiagnosing: boolean;
   diagnosisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
+  diagnosisHistory: TargetDiagnosis[];
 }
 
 export type AppAction =
@@ -255,4 +256,5 @@ export type AppAction =
   | { type: 'DIAGNOSIS_SUCCESS'; diagnosis: TargetDiagnosis }
   | { type: 'DIAGNOSIS_FAILURE'; error: string }
   | { type: 'DIAGNOSIS_STEP'; step: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done' }
-  | { type: 'CLEAR_DIAGNOSIS' };
+  | { type: 'CLEAR_DIAGNOSIS' }
+  | { type: 'SET_DIAGNOSIS_HISTORY'; history: TargetDiagnosis[] };

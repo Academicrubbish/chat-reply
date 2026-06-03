@@ -54,8 +54,8 @@ function parseAiMessages(aiMessages: AIMessage[]): HistoricalRound[] {
       if (!data.replies || data.replies.length === 0) continue;
 
       const analysis: AnalysisData = data.analysis || {
-        stage: '快速模式', signal: '—', strategy: '—',
-        signalText: '快速模式无分析', emotions: [],
+        stage: '—', signal: '—', strategy: '—',
+        signalText: '由诊断方案提供方向', emotions: [],
         tip: '', favorability: 50, favorabilityReason: '',
       };
       const roundId = msg.round_id || `legacy-${msg.id}`;
@@ -89,8 +89,8 @@ function parseAiMessages(aiMessages: AIMessage[]): HistoricalRound[] {
       if (!data.replies || data.replies.length === 0) continue;
 
       const analysis: AnalysisData = data.analysis || {
-        stage: '快速模式', signal: '—', strategy: '—',
-        signalText: '快速模式无分析', emotions: [],
+        stage: '—', signal: '—', strategy: '—',
+        signalText: '由诊断方案提供方向', emotions: [],
         tip: '', favorability: 50, favorabilityReason: '',
       };
       const version: RoundVersion = { analysis, replies: data.replies, aiMessageId: msg.id };

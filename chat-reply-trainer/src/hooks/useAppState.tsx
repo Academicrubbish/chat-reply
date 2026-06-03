@@ -34,6 +34,7 @@ const initialState: AppState = {
   activeDiagnosis: null,
   isDiagnosing: false,
   diagnosisStep: 'idle' as const,
+  diagnosisHistory: [],
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -63,6 +64,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         activeDiagnosis: null,
         isDiagnosing: false,
         diagnosisStep: 'idle' as const,
+        diagnosisHistory: [],
       };
     }
     case 'SEND_HER_MESSAGE':
@@ -279,7 +281,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: null,
       };
     case 'ANALYSIS_SUCCESS':
-      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisDrawerOpen: true };
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisStep: 'idle' as const, analysisDrawerOpen: true };
     case 'ANALYSIS_FAILURE':
       return { ...state, isAnalyzing: false, analysisStep: 'idle' as const, error: action.error };
     case 'CLOSE_ANALYSIS_DRAWER':
@@ -307,6 +309,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, diagnosisStep: action.step };
     case 'CLEAR_DIAGNOSIS':
       return { ...state, activeDiagnosis: null };
+    case 'SET_DIAGNOSIS_HISTORY':
+      return { ...state, diagnosisHistory: action.history };
     default:
       return state;
   }
@@ -381,6 +385,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     api.getAnalyses(id).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
     // Load active diagnosis for this target
     api.getActiveDiagnosis(id).then(r => dispatch({ type: 'SET_ACTIVE_DIAGNOSIS', diagnosis: r.diagnosis })).catch(() => {});
+    // Load diagnosis history
+    api.getDiagnoses(id).then(h => dispatch({ type: 'SET_DIAGNOSIS_HISTORY', history: h })).catch(() => {});
   };
 
   const sendHerMessage = (text: string) => {
@@ -563,6 +569,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Optionally stream text during diagnosis
         } else if (evt.event === 'diagnosis_done') {
           dispatch({ type: 'DIAGNOSIS_SUCCESS', diagnosis: evt.data.diagnosis });
+          // Refresh diagnosis history
+          if (state.currentTargetId) {
+            api.getDiagnoses(state.currentTargetId).then(h => dispatch({ type: 'SET_DIAGNOSIS_HISTORY', history: h })).catch(() => {});
+          }
         }
       },
       (err) => {

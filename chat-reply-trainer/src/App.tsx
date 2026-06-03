@@ -18,7 +18,7 @@ import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
-import AnalysisDrawer, { AnalysisSteps, AnalysisModal } from './components/AnalysisDrawer';
+import AnalysisDrawer, { AnalysisSteps, AnalysisModal, ReviewModal } from './components/AnalysisDrawer';
 import { Card } from 'antd';
 
 function AppContent() {
@@ -27,6 +27,7 @@ function AppContent() {
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const regenAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -327,6 +328,7 @@ function AppContent() {
             onSelectProvider={setSelectedProvider}
             onTriggerAnalysis={triggerAnalysis}
             onOpenAnalysisModal={() => setAnalysisModalOpen(true)}
+            onOpenReviewModal={() => setReviewModalOpen(true)}
             isAnalyzing={state.isAnalyzing}
             analysisMode={state.analysisMode}
             analysis={state.currentAnalysis}
@@ -435,9 +437,10 @@ function AppContent() {
         onClose={() => setAnalysisModalOpen(false)}
         targetName={currentTarget?.name || ''}
         activeDiagnosis={state.activeDiagnosis}
+        diagnosisHistory={state.diagnosisHistory}
         isDiagnosing={state.isDiagnosing}
         onDiagnose={diagnoseTarget}
-        advisorResult={state.analysisResult as any}
+        advisorResult={state.analysisMode === 'advisor' ? state.analysisResult as any : null}
         isAnalyzing={state.isAnalyzing}
         analysisMode={state.analysisMode}
         onTriggerAnalysis={triggerAnalysis}
@@ -448,6 +451,25 @@ function AppContent() {
             dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
           } catch {}
         }}
+      />
+      <ReviewModal
+        open={reviewModalOpen}
+        onClose={() => setReviewModalOpen(false)}
+        targetName={currentTarget?.name || ''}
+        isAnalyzing={state.isAnalyzing}
+        analysisMode={state.analysisMode}
+        analysisStep={state.analysisStep}
+        onTriggerReview={() => {
+          triggerAnalysis('review');
+        }}
+        history={state.analysisHistory}
+        onSelectHistory={(record) => {
+          try {
+            const parsed = JSON.parse(record.content);
+            dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
+          } catch {}
+        }}
+        currentResult={state.analysisMode === 'review' ? state.analysisResult as any : null}
       />
     </>
   );
