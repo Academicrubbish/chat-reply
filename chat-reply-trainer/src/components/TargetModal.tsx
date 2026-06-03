@@ -138,7 +138,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
       onOk={handleOk}
       okText="保存"
       cancelText="取消"
-      width={960}
+      width="min(95vw, 960px)"
       destroyOnHidden
     >
       <Form

@@ -249,7 +249,7 @@ function AppContent() {
             <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
           </div>
         </div>
-        <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} />
+        <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} isMobile={isMobile} />
         <TargetModal
           open={state.modalOpen}
           target={state.editingTarget}
@@ -265,11 +265,11 @@ function AppContent() {
       {contextHolder}
 
       {/* Top Bar */}
-      <div className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 shrink-0">
+      <div className="h-14 bg-white border-b border-border flex items-center shrink-0" style={{ padding: isMobile ? '0 12px' : '0 24px', gap: isMobile ? 8 : 16 }}>
         <div className="w-9 h-9 bg-linear-to-br from-[#667eea] to-[#764ba2] rounded-lg flex items-center justify-center text-white font-bold text-base">AI</div>
         <div className="flex flex-col">
           <h1>聊天模拟器</h1>
-          <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
+          {!isMobile && <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>}
         </div>
         <div className="flex-1" />
         <TargetSelector
@@ -284,13 +284,13 @@ function AppContent() {
           icon={<LogoutOutlined />}
           onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
         >
-          退出
+          {isMobile ? '' : '退出'}
         </Button>
       </div>
 
       {/* Mobile Tab Bar */}
       {isMobile && (
-        <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
+        <div data-tour-id="mobile-tab-bar" style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
           <button onClick={() => setMobileTab('chat')} style={{
             flex: 1, padding: '8px 0', border: 'none', background: mobileTab === 'chat' ? '#e8f0fe' : '#fff',
             color: mobileTab === 'chat' ? '#3b5998' : '#666', fontWeight: mobileTab === 'chat' ? 600 : 400,
@@ -335,6 +335,7 @@ function AppContent() {
             activeDiagnosis={state.activeDiagnosis}
             isDiagnosing={state.isDiagnosing}
             onDiagnose={diagnoseTarget}
+            isMobile={isMobile}
           />
 
           {/* Analysis step chain — visible in main panel during generation */}
@@ -388,6 +389,7 @@ function AppContent() {
             onReset={handleReset}
             aiMode={aiMode}
             onAiModeChange={setAiMode}
+            isMobile={isMobile}
           />
           <ErrorBoundary boundaryName="聊天记录" fallback={(_err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>

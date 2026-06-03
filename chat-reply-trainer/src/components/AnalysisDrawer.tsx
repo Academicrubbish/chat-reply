@@ -153,7 +153,7 @@ function KnowledgeTag({ id }: { id: string }) {
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         footer={null}
-        width={640}
+        width="min(90vw, 640px)"
         title={detail ? `${detail.id} ${detail.title}` : `知识单元 ${id}`}
         styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
       >
@@ -609,7 +609,7 @@ function DiagnosisTab({
 
   return (
     <div>
-      <Descriptions column={2} bordered size="small">
+      <Descriptions column={window.innerWidth < 500 ? 1 : 2} bordered size="small">
         <Descriptions.Item label="关系阶段">
           <Tag color="blue">{diagnosis.stage}</Tag>
         </Descriptions.Item>
@@ -733,7 +733,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
       open={open}
       onCancel={onClose}
       footer={null}
-      width={900}
+      width="min(90vw, 900px)"
       styles={{ body: { padding: '12px 0', maxHeight: '70vh', overflowY: 'auto' } }}
     >
       <Tabs
@@ -829,7 +829,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       open={open}
       onCancel={onClose}
       footer={null}
-      width={900}
+      width="min(90vw, 900px)"
       styles={{ body: { padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' } }}
     >
       {isReviewAnalyzing ? (

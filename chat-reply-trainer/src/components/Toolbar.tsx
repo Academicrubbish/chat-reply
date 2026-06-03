@@ -42,6 +42,8 @@ interface ToolbarProps {
   activeDiagnosis?: TargetDiagnosis | null;
   isDiagnosing?: boolean;
   onDiagnose?: () => void;
+  // Responsive
+  isMobile?: boolean;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
@@ -49,7 +51,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   session, sessions, onSelectSession, onCreateSession, onDeleteSession,
   models = [], selectedProvider = 'zhipu', onSelectProvider,
   onTriggerAnalysis, onOpenAnalysisModal, onOpenReviewModal, isAnalyzing = false, analysisMode = null,
-  analysis, activeDiagnosis, isDiagnosing = false, onDiagnose,
+  analysis, activeDiagnosis, isDiagnosing = false, onDiagnose, isMobile = false,
 }) => {
   const currentIndex = session ? sessions.findIndex(s => s.id === session.id) : -1;
   const displayIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
@@ -127,17 +129,19 @@ const Toolbar: React.FC<ToolbarProps> = ({
           {roundCount} 轮对话
         </span>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap' }}>上下文</span>
-          <Progress
-            percent={contextPercentage}
-            size="small"
-            strokeColor={contextPercentage > 80 ? '#fa8c16' : '#52c41a'}
-            showInfo
-            format={() => `${contextPercentage}%`}
-            style={{ width: 80, marginBottom: 0 }}
-          />
-        </div>
+        {!isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap' }}>上下文</span>
+            <Progress
+              percent={contextPercentage}
+              size="small"
+              strokeColor={contextPercentage > 80 ? '#fa8c16' : '#52c41a'}
+              showInfo
+              format={() => `${contextPercentage}%`}
+              style={{ width: 80, marginBottom: 0 }}
+            />
+          </div>
+        )}
 
         {onOpenAnalysisModal && (
           <Tooltip title={isAnalyzing ? '分析进行中，点击查看进度' : activeDiagnosis ? `当前方案：${activeDiagnosis.stage} - ${activeDiagnosis.action}` : '查看或制定聊天方案'}>
@@ -163,7 +167,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         )}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
-          {models.length > 1 && onSelectProvider && (
+          {!isMobile && models.length > 1 && onSelectProvider && (
             <Select size="small" value={selectedProvider} style={{ width: 120 }}
               onChange={onSelectProvider}
               options={models.map(m => ({ value: m.provider, label: m.label }))}
