@@ -21,7 +21,7 @@ function getClient(provider: string = 'zhipu'): OpenAI {
   if (!config) throw new Error(`未知的模型提供者: ${provider}`);
 
   const apiKey = process.env[config.apiKeyEnv];
-  if (!apiKey) throw new Error(`${config.apiKeyEnv} 未配置，请在 .env 文件中设置`);
+  if (!apiKey) throw new Error(`当前AI模型（${config.label}）未配置，请切换其他模型或联系管理员`);
 
   const baseURL = process.env[config.baseUrlEnv] || (provider === 'zhipu' ? 'https://open.bigmodel.cn/api/paas/v4/' : undefined);
   clients[provider] = new OpenAI({ apiKey, ...(baseURL && { baseURL }) });
@@ -68,6 +68,10 @@ export async function* chatCompletionStream(messages: Array<{ role: string; cont
       return;
     } catch (err: any) {
       lastError = err;
+      // 配置错误直接抛出，不降级返回假数据
+      if (err.message?.includes('未配置') || err.message?.includes('未知的模型提供者')) {
+        throw err;
+      }
       if (attempt < maxRetries) {
         console.log(`[LLM] Stream attempt ${attempt + 1} failed, retrying...`, err.message);
       }

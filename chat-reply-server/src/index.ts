@@ -765,6 +765,14 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
       return;
     }
 
+    // Validate: must have attitude and emotion
+    if (!parsed.attitude?.level || !parsed.emotion?.type) {
+      console.error('[Diagnose Invalid] LLM returned unexpected structure:', JSON.stringify(parsed).slice(0, 500));
+      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果格式异常，请重试' })}\n\n`);
+      res.end();
+      return;
+    }
+
     // Save to chat_diagnoses
     const diag = parsed.diagnosis || {};
     const diagId = uuid();
@@ -875,6 +883,12 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
   if (!parsed) {
     console.error('[Auto-Diagnose Parse Error] Raw:', raw.slice(0, 500));
     throw new Error('自动诊断解析失败');
+  }
+
+  // Validate: must have attitude and emotion
+  if (!parsed.attitude?.level || !parsed.emotion?.type) {
+    console.error('[Auto-Diagnose Invalid] Unexpected structure:', JSON.stringify(parsed).slice(0, 500));
+    throw new Error('自动诊断结果格式异常');
   }
 
   const diag = parsed.diagnosis || {};

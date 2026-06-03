@@ -86,19 +86,22 @@ const Toolbar: React.FC<ToolbarProps> = ({
               )}
             </div>
             {target && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2, alignItems: 'center' }}>
+              <div className={isMobile ? 'hide-scrollbar' : undefined} style={{
+                display: 'flex', gap: 4, marginTop: 2, alignItems: 'center',
+                ...(isMobile ? { overflowX: 'auto', flexWrap: 'nowrap' } : { flexWrap: 'wrap' }),
+              }}>
                 {[target.meet_scene, target.goal_intent, target.tone_level].filter(Boolean).map((tag, i) => (
-                  <Tag key={i} color={tagColorMap[tag] || 'default'} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                  <Tag key={i} color={tagColorMap[tag] || 'default'} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, flexShrink: 0 }}>
                     {tagLabelMap[tag] || tag}
                   </Tag>
                 ))}
-                {analysis?.stage && <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.stage}</Tag>}
-                {analysis?.signal && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.signal}</Tag>}
-                {analysis?.strategy && <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.strategy}</Tag>}
+                {!isMobile && analysis?.stage && <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.stage}</Tag>}
+                {!isMobile && analysis?.signal && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.signal}</Tag>}
+                {!isMobile && analysis?.strategy && <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.strategy}</Tag>}
                 {activeDiagnosis && (
                   <Tag
                     color="purple"
-                    style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, cursor: 'pointer' }}
+                    style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, cursor: 'pointer', flexShrink: 0 }}
                     onClick={onOpenAnalysisModal}
                   >
                     {activeDiagnosis.stage} · {activeDiagnosis.strategy}
@@ -167,7 +170,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         )}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
-          {!isMobile && models.length > 1 && onSelectProvider && (
+          {!isMobile && models.length > 0 && onSelectProvider && (
             <Select size="small" value={selectedProvider} style={{ width: 120 }}
               onChange={onSelectProvider}
               options={models.map(m => ({ value: m.provider, label: m.label }))}
