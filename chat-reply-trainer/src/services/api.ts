@@ -231,5 +231,8 @@ export function diagnoseStream(
 export const getKnowledgeUnits = () =>
   request<{ units: any[]; total: number }>('/knowledge/units');
 
+export const getKnowledgeUnit = (id: string) =>
+  request<{ unit: any; relations: any }>(`/knowledge/units/${id}`);
+
 export const getKnowledgeMode = (mode: string) =>
   request<any>(`/knowledge/mode/${mode}`);

@@ -18,7 +18,7 @@ import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
-import { AnalysisSteps, AnalysisModal } from './components/AnalysisDrawer';
+import { AnalysisSteps, AnalysisModal, ReviewModal } from './components/AnalysisDrawer';
 import { Card } from 'antd';
 
 function AppContent() {
@@ -27,6 +27,7 @@ function AppContent() {
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const regenAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -248,7 +249,7 @@ function AppContent() {
             <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
           </div>
         </div>
-        <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} />
+        <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} isMobile={isMobile} />
         <TargetModal
           open={state.modalOpen}
           target={state.editingTarget}
@@ -264,11 +265,11 @@ function AppContent() {
       {contextHolder}
 
       {/* Top Bar */}
-      <div className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 shrink-0">
+      <div className="h-14 bg-white border-b border-border flex items-center shrink-0" style={{ padding: isMobile ? '0 12px' : '0 24px', gap: isMobile ? 8 : 16 }}>
         <div className="w-9 h-9 bg-linear-to-br from-[#667eea] to-[#764ba2] rounded-lg flex items-center justify-center text-white font-bold text-base">AI</div>
         <div className="flex flex-col">
           <h1>聊天模拟器</h1>
-          <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
+          {!isMobile && <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>}
         </div>
         <div className="flex-1" />
         <TargetSelector
@@ -283,13 +284,13 @@ function AppContent() {
           icon={<LogoutOutlined />}
           onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
         >
-          退出
+          {isMobile ? '' : '退出'}
         </Button>
       </div>
 
       {/* Mobile Tab Bar */}
       {isMobile && (
-        <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
+        <div data-tour-id="mobile-tab-bar" style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
           <button onClick={() => setMobileTab('chat')} style={{
             flex: 1, padding: '8px 0', border: 'none', background: mobileTab === 'chat' ? '#e8f0fe' : '#fff',
             color: mobileTab === 'chat' ? '#3b5998' : '#666', fontWeight: mobileTab === 'chat' ? 600 : 400,
@@ -327,12 +328,14 @@ function AppContent() {
             onSelectProvider={setSelectedProvider}
             onTriggerAnalysis={triggerAnalysis}
             onOpenAnalysisModal={() => setAnalysisModalOpen(true)}
+            onOpenReviewModal={() => setReviewModalOpen(true)}
             isAnalyzing={state.isAnalyzing}
             analysisMode={state.analysisMode}
             analysis={state.currentAnalysis}
             activeDiagnosis={state.activeDiagnosis}
             isDiagnosing={state.isDiagnosing}
             onDiagnose={diagnoseTarget}
+            isMobile={isMobile}
           />
 
           {/* Analysis step chain — visible in main panel during generation */}
@@ -386,6 +389,7 @@ function AppContent() {
             onReset={handleReset}
             aiMode={aiMode}
             onAiModeChange={setAiMode}
+            isMobile={isMobile}
           />
           <ErrorBoundary boundaryName="聊天记录" fallback={(_err, retry) => (
             <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -435,9 +439,10 @@ function AppContent() {
         onClose={() => setAnalysisModalOpen(false)}
         targetName={currentTarget?.name || ''}
         activeDiagnosis={state.activeDiagnosis}
+        diagnosisHistory={state.diagnosisHistory}
         isDiagnosing={state.isDiagnosing}
         onDiagnose={diagnoseTarget}
-        advisorResult={state.analysisResult as any}
+        advisorResult={state.analysisMode === 'advisor' ? state.analysisResult as any : null}
         isAnalyzing={state.isAnalyzing}
         analysisMode={state.analysisMode}
         onTriggerAnalysis={triggerAnalysis}
@@ -448,6 +453,25 @@ function AppContent() {
             dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
           } catch {}
         }}
+      />
+      <ReviewModal
+        open={reviewModalOpen}
+        onClose={() => setReviewModalOpen(false)}
+        targetName={currentTarget?.name || ''}
+        isAnalyzing={state.isAnalyzing}
+        analysisMode={state.analysisMode}
+        analysisStep={state.analysisStep}
+        onTriggerReview={() => {
+          triggerAnalysis('review');
+        }}
+        history={state.analysisHistory}
+        onSelectHistory={(record) => {
+          try {
+            const parsed = JSON.parse(record.content);
+            dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
+          } catch {}
+        }}
+        currentResult={state.analysisMode === 'review' ? state.analysisResult as any : null}
       />
     </>
   );

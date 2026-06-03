@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Drawer, Card, Tag, Collapse, Empty, Divider, Tooltip, Modal, Tabs, Button, Descriptions, Spin } from 'antd';
 import { LikeOutlined, WarningOutlined, BulbOutlined, AimOutlined, HeartOutlined, SmileOutlined, CheckCircleFilled, LoadingOutlined, HistoryOutlined, SafetyCertificateOutlined, RadarChartOutlined, BarChartOutlined } from '@ant-design/icons';
 import type { AdvisorAnalysis, ReviewAnalysis, ReviewScores, AnalysisRecord, TargetDiagnosis } from '../types';
+import { getKnowledgeUnit } from '../services/api';
 
 // ===== Analysis Step Chain =====
 type AnalysisStep = 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
@@ -112,14 +113,92 @@ function RadarChart({ scores }: { scores: ReviewScores }) {
   );
 }
 
-// ===== 知识单元标签 =====
+// ===== 知识单元标签（点击查看详情）=====
+const UNIT_TYPE_MAP: Record<string, { label: string; color: string }> = {
+  framework: { label: '框架', color: 'blue' },
+  principle: { label: '原则', color: 'green' },
+  scenario: { label: '场景', color: 'orange' },
+  concept: { label: '概念', color: 'purple' },
+};
+
 function KnowledgeTag({ id }: { id: string }) {
+  const [detail, setDetail] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const handleClick = useCallback(async () => {
+    setModalOpen(true);
+    if (detail) return; // already loaded
+    setLoading(true);
+    try {
+      const res = await getKnowledgeUnit(id);
+      setDetail(res.unit);
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [id, detail]);
+
+  const typeInfo = detail ? UNIT_TYPE_MAP[detail.type] : null;
+
   return (
-    <Tooltip title={`知识单元：${id}`}>
-      <Tag style={{ fontSize: 10, padding: '0 4px', lineHeight: '18px', cursor: 'help', background: '#e6f4ff', border: '1px solid #91caff' }}>
-        {id}
-      </Tag>
-    </Tooltip>
+    <>
+      <Tooltip title={`点击查看知识单元 ${id}`}>
+        <Tag
+          onClick={handleClick}
+          style={{ fontSize: 10, padding: '0 6px', lineHeight: '18px', cursor: 'pointer', background: '#e6f4ff', border: '1px solid #91caff' }}
+        >
+          {id}
+        </Tag>
+      </Tooltip>
+      <Modal
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={null}
+        width="min(90vw, 640px)"
+        title={detail ? `${detail.id} ${detail.title}` : `知识单元 ${id}`}
+        styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
+      >
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : detail ? (
+          <div>
+            {typeInfo && <Tag color={typeInfo.color} style={{ marginBottom: 12 }}>{typeInfo.label}</Tag>}
+            {detail.reading && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>📖 原文引用</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6, background: '#f6f8fa', padding: '8px 12px', borderRadius: 6 }}>{detail.reading}</div>
+              </div>
+            )}
+            {detail.interpretation && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>🧠 方法论</div>
+                <div style={{ fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{detail.interpretation}</div>
+              </div>
+            )}
+            {detail.execution?.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>🎯 操作步骤</div>
+                <ol style={{ paddingLeft: 20, margin: 0 }}>
+                  {detail.execution.map((s: any, i: number) => (
+                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 4 }}>
+                      {s.action}
+                      {s.stopCondition && <span style={{ color: '#fa8c16' }}>（判停：{s.stopCondition}）</span>}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+            {detail.boundary?.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>⚠️ 边界条件</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: '#666' }}>{detail.boundary.join('；')}</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>加载失败</div>
+        )}
+      </Modal>
+    </>
   );
 }
 
@@ -309,7 +388,7 @@ function ReviewView({ data }: { data: ReviewAnalysis }) {
 
       {/* Radar Chart + Score */}
       {scores ? (
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ textAlign: 'center', marginBottom: 4 }}>
             <div style={{ fontSize: 36, fontWeight: 700, color: scoreColor }}>{score}</div>
             <div style={{ fontSize: 12, color: '#999' }}>综合评分</div>
@@ -500,10 +579,12 @@ export default AnalysisDrawer;
 // ===== Diagnosis Tab =====
 function DiagnosisTab({
   diagnosis,
+  diagnosisHistory = [],
   isDiagnosing,
   onDiagnose,
 }: {
   diagnosis: TargetDiagnosis | null;
+  diagnosisHistory?: TargetDiagnosis[];
   isDiagnosing: boolean;
   onDiagnose: () => void;
 }) {
@@ -528,7 +609,7 @@ function DiagnosisTab({
 
   return (
     <div>
-      <Descriptions column={2} bordered size="small">
+      <Descriptions column={window.innerWidth < 500 ? 1 : 2} bordered size="small">
         <Descriptions.Item label="关系阶段">
           <Tag color="blue">{diagnosis.stage}</Tag>
         </Descriptions.Item>
@@ -576,6 +657,32 @@ function DiagnosisTab({
         </div>
       )}
 
+      {/* 诊断历史 */}
+      {diagnosisHistory.length > 1 && (
+        <div style={{ marginTop: 16 }}>
+          <Divider style={{ margin: '8px 0' }}>
+            <span style={{ fontSize: 11, color: '#999' }}><HistoryOutlined style={{ marginRight: 4 }} />历史诊断</span>
+          </Divider>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+            {diagnosisHistory.filter(d => d.id !== diagnosis?.id).map((record) => {
+              const d = new Date(record.created_at);
+              const timeStr = `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+              return (
+                <div key={record.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 8px', borderRadius: 6, background: '#fafafa', border: '1px solid #eee', fontSize: 12,
+                }}>
+                  <span>🎯</span>
+                  <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{record.stage}</Tag>
+                  <span style={{ color: '#666', flex: 1 }}>{record.strategy}</span>
+                  <span style={{ color: '#999', fontSize: 11 }}>{timeStr}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{ marginTop: 16, textAlign: 'right' }}>
         <Button onClick={onDiagnose} loading={isDiagnosing}>重新诊断</Button>
       </div>
@@ -583,13 +690,14 @@ function DiagnosisTab({
   );
 }
 
-// ===== Unified Analysis Modal =====
+// ===== Analysis Modal (定制方案 + 军师分析) =====
 export interface AnalysisModalProps {
   open: boolean;
   onClose: () => void;
   targetName: string;
   // Diagnosis
   activeDiagnosis: TargetDiagnosis | null;
+  diagnosisHistory?: TargetDiagnosis[];
   isDiagnosing: boolean;
   onDiagnose: () => void;
   // Advisor analysis
@@ -604,26 +712,19 @@ export interface AnalysisModalProps {
 
 export const AnalysisModal: React.FC<AnalysisModalProps> = ({
   open, onClose, targetName,
-  activeDiagnosis, isDiagnosing, onDiagnose,
+  activeDiagnosis, diagnosisHistory, isDiagnosing, onDiagnose,
   advisorResult, isAnalyzing, analysisMode, onTriggerAnalysis,
   history, onSelectHistory,
 }) => {
   const [activeTab, setActiveTab] = useState('diagnosis');
-
-  // Filter history by type
   const advisorHistory = history.filter(h => h.msg_type === 'advisor');
-  const reviewHistory = history.filter(h => h.msg_type === 'review');
 
-  // Get latest review from history if not currently analyzing
-  const latestReviewRecord = reviewHistory[0];
-  const latestReviewResult = latestReviewRecord
-    ? (() => { try { return JSON.parse(latestReviewRecord.content) as ReviewAnalysis; } catch { return null; } })()
-    : null;
+  // Only show advisor result when it's actually an advisor analysis
+  const isAdvisorResult = analysisMode === 'advisor' && advisorResult;
 
   const handleSelectHistory = (record: AnalysisRecord) => {
     onSelectHistory(record);
     if (record.msg_type === 'advisor') setActiveTab('advisor');
-    else if (record.msg_type === 'review') setActiveTab('review');
   };
 
   return (
@@ -632,7 +733,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
       open={open}
       onCancel={onClose}
       footer={null}
-      width={640}
+      width="min(90vw, 900px)"
       styles={{ body: { padding: '12px 0', maxHeight: '70vh', overflowY: 'auto' } }}
     >
       <Tabs
@@ -651,6 +752,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             children: (
               <DiagnosisTab
                 diagnosis={activeDiagnosis}
+                diagnosisHistory={diagnosisHistory}
                 isDiagnosing={isDiagnosing}
                 onDiagnose={onDiagnose}
               />
@@ -671,7 +773,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
                     <Spin size="large" />
                     <div style={{ marginTop: 16, color: '#999' }}>军师分析中...</div>
                   </div>
-                ) : advisorResult ? (
+                ) : isAdvisorResult ? (
                   <AdvisorView data={advisorResult} />
                 ) : (
                   <Empty description="暂无军师分析">
@@ -682,34 +784,80 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
               </div>
             ),
           },
-          {
-            key: 'review',
-            label: (
-              <span>
-                <BarChartOutlined /> 总结复盘
-                {isAnalyzing && analysisMode === 'review' && <LoadingOutlined style={{ marginLeft: 4, color: '#1677ff' }} spin />}
-              </span>
-            ),
-            children: (
-              <div>
-                {isAnalyzing && analysisMode === 'review' ? (
-                  <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                    <Spin size="large" />
-                    <div style={{ marginTop: 16, color: '#999' }}>复盘总结中...</div>
-                  </div>
-                ) : latestReviewResult ? (
-                  <ReviewView data={latestReviewResult} />
-                ) : (
-                  <Empty description="暂无复盘总结">
-                    <Button onClick={() => onTriggerAnalysis('review')}>开始复盘</Button>
-                  </Empty>
-                )}
-                <HistoryList history={reviewHistory} onSelect={handleSelectHistory} />
-              </div>
-            ),
-          },
         ]}
       />
+    </Modal>
+  );
+};
+
+// ===== Review Modal (独立复盘弹窗) =====
+export interface ReviewModalProps {
+  open: boolean;
+  onClose: () => void;
+  targetName: string;
+  isAnalyzing: boolean;
+  analysisMode: 'advisor' | 'review' | null;
+  analysisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
+  onTriggerReview: () => void;
+  history: AnalysisRecord[];
+  onSelectHistory: (record: AnalysisRecord) => void;
+  currentResult: ReviewAnalysis | null;
+}
+
+export const ReviewModal: React.FC<ReviewModalProps> = ({
+  open, onClose, targetName,
+  isAnalyzing, analysisMode, analysisStep,
+  onTriggerReview, history, onSelectHistory, currentResult,
+}) => {
+  const reviewHistory = history.filter(h => h.msg_type === 'review');
+
+  // Latest review: prefer currentResult (user-selected or freshly analyzed), fallback to history
+  const latestFromHistory = reviewHistory[0]
+    ? (() => { try { return JSON.parse(reviewHistory[0].content) as ReviewAnalysis; } catch { return null; } })()
+    : null;
+  const reviewResult = currentResult || latestFromHistory;
+
+  const handleSelectHistory = (record: AnalysisRecord) => {
+    onSelectHistory(record);
+  };
+
+  const isReviewAnalyzing = isAnalyzing && analysisMode === 'review';
+
+  return (
+    <Modal
+      title={`📊 ${targetName} 的复盘总结`}
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width="min(90vw, 900px)"
+      styles={{ body: { padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' } }}
+    >
+      {isReviewAnalyzing ? (
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <AnalysisSteps currentStep={analysisStep} />
+          <div style={{ marginTop: 16, color: '#999' }}>复盘分析中...</div>
+        </div>
+      ) : reviewResult ? (
+        <ReviewView data={reviewResult} />
+      ) : (
+        <Empty description="暂无复盘总结">
+          <Button type="primary" onClick={onTriggerReview}>开始复盘</Button>
+        </Empty>
+      )}
+
+      {/* 复盘/重新复盘按钮 */}
+      <div style={{ marginTop: 16, textAlign: 'right', borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+        <Button
+          type={reviewResult ? 'default' : 'primary'}
+          icon={<BarChartOutlined />}
+          loading={isReviewAnalyzing}
+          onClick={onTriggerReview}
+        >
+          {reviewResult ? '重新复盘' : '开始复盘'}
+        </Button>
+      </div>
+
+      <HistoryList history={reviewHistory} onSelect={handleSelectHistory} />
     </Modal>
   );
 };
