@@ -22,7 +22,7 @@ import AnalysisDrawer, { AnalysisSteps } from './components/AnalysisDrawer';
 import { Card } from 'antd';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis, diagnoseTarget, clearDiagnosis } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -329,6 +329,9 @@ function AppContent() {
             isAnalyzing={state.isAnalyzing}
             analysisMode={state.analysisMode}
             analysis={state.currentAnalysis}
+            activeDiagnosis={state.activeDiagnosis}
+            isDiagnosing={state.isDiagnosing}
+            onDiagnose={diagnoseTarget}
           />
 
           {/* Analysis step chain — visible in main panel during generation */}

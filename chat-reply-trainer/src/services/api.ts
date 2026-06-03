@@ -282,6 +282,61 @@ export const getDiagnoses = (targetId: string) =>
 export const getWarnings = (targetId: string) =>
   request<any[]>(`/targets/${targetId}/warnings`);
 
+// Active diagnosis (diagnosis-first architecture)
+export const getActiveDiagnosis = (targetId: string) =>
+  request<{ diagnosis: any }>(`/targets/${targetId}/active-diagnosis`);
+
+export const clearActiveDiagnosis = (targetId: string) =>
+  request<{ success: boolean }>(`/targets/${targetId}/active-diagnosis`, { method: 'DELETE' });
+
+export function diagnoseStream(
+  targetId: string,
+  provider: string = 'zhipu',
+  onEvent: (evt: SSEEvent) => void,
+  onError?: (err: Error) => void,
+): AbortController {
+  const ctrl = new AbortController();
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  fetch(`${BASE}/targets/${targetId}/diagnose`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ provider }),
+    signal: ctrl.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: '请求失败' }));
+      onError?.(new Error(data.error || '诊断失败'));
+      return;
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEvent = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
+        else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            onEvent({ event: currentEvent, data });
+          } catch {}
+        }
+      }
+    }
+  }).catch((err) => {
+    if (err.name !== 'AbortError') onError?.(err);
+  });
+  return ctrl;
+}
+
 // Knowledge base
 export const getKnowledgeUnits = () =>
   request<{ units: any[]; total: number }>('/knowledge/units');

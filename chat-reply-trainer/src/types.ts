@@ -121,6 +121,23 @@ export interface AdvisorAnalysis {
   nextStep: { action: string; strategy: string; keyPoints: string[]; warnings: string[] };
 }
 
+export interface TargetDiagnosis {
+  id: string;
+  target_id: string;
+  attitude_level: string;
+  language_pattern: string;
+  emotion_type: string;
+  emotion_valence: string;
+  stage: string;
+  upgrade_ready: boolean;
+  upgrade_reason: string;
+  warnings: string[];
+  action: string;
+  strategy: string;
+  knowledgeIds: string[];
+  created_at: number;
+}
+
 export interface ReviewScores {
   signalRecognition: number;
   strategySelection: number;
@@ -187,6 +204,9 @@ export interface AppState {
   isAnalyzing: boolean;
   analysisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
   analysisHistory: AnalysisRecord[];
+  activeDiagnosis: TargetDiagnosis | null;
+  isDiagnosing: boolean;
+  diagnosisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
 }
 
 export type AppAction =
@@ -226,4 +246,10 @@ export type AppAction =
   | { type: 'ANALYSIS_STEP'; step: 'analyzing' | 'generating' | 'parsing' | 'done' }
   | { type: 'ANALYSIS_DELTA'; text: string }
   | { type: 'SET_ANALYSIS_HISTORY'; history: AnalysisRecord[] }
-  | { type: 'VIEW_HISTORY_ANALYSIS'; analysisMode: 'advisor' | 'review'; data: any };
+  | { type: 'VIEW_HISTORY_ANALYSIS'; analysisMode: 'advisor' | 'review'; data: any }
+  | { type: 'SET_ACTIVE_DIAGNOSIS'; diagnosis: TargetDiagnosis | null }
+  | { type: 'TRIGGER_DIAGNOSE' }
+  | { type: 'DIAGNOSIS_SUCCESS'; diagnosis: TargetDiagnosis }
+  | { type: 'DIAGNOSIS_FAILURE'; error: string }
+  | { type: 'DIAGNOSIS_STEP'; step: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done' }
+  | { type: 'CLEAR_DIAGNOSIS' };
