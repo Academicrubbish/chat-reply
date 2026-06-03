@@ -18,7 +18,7 @@ import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
 import MessageInput from './components/MessageInput';
-import AnalysisDrawer, { AnalysisSteps } from './components/AnalysisDrawer';
+import AnalysisDrawer, { AnalysisSteps, AnalysisModal } from './components/AnalysisDrawer';
 import { Card } from 'antd';
 
 function AppContent() {
@@ -26,6 +26,7 @@ function AppContent() {
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const regenAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -200,6 +201,12 @@ function AppContent() {
     regenAbortRef.current = ctrl;
   };
 
+  const handleCancelGeneration = () => {
+    regenAbortRef.current?.abort();
+    regenAbortRef.current = null;
+    dispatch({ type: 'CANCEL_GENERATION' });
+  };
+
   const handleEditMessage = async (id: string, text: string) => {
     await api.updateMessage(id, text);
     dispatch({ type: 'EDIT_MESSAGE', id, text });
@@ -307,13 +314,7 @@ function AppContent() {
           <Toolbar
             target={currentTarget}
             onEditTarget={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
-            onAIAssist={() => {
-              if (aiMode === 'advisor' || aiMode === 'review') {
-                triggerAnalysis(aiMode);
-              } else {
-                triggerAI();
-              }
-            }}
+            onAIAssist={() => triggerAI()}
             isGenerating={state.phase === 'generating' || state.isAnalyzing}
             aiMode={aiMode}
             session={state.sessions.find(s => s.id === state.currentSessionId) || null}
@@ -325,7 +326,7 @@ function AppContent() {
             selectedProvider={selectedProvider}
             onSelectProvider={setSelectedProvider}
             onTriggerAnalysis={triggerAnalysis}
-            onShowHistory={() => dispatch({ type: 'OPEN_ANALYSIS_DRAWER' })}
+            onOpenAnalysisModal={() => setAnalysisModalOpen(true)}
             isAnalyzing={state.isAnalyzing}
             analysisMode={state.analysisMode}
             analysis={state.currentAnalysis}
@@ -369,6 +370,7 @@ function AppContent() {
             onSelectReply={(reply, aiMessageId) => selectReplyAction(reply, aiMessageId)}
             onCustomReply={sendCustomReply}
             onRegenerate={handleRegenerate}
+            onCancel={handleCancelGeneration}
             onFeedback={handleFeedback}
           />
           </ErrorBoundary>
@@ -401,9 +403,15 @@ function AppContent() {
           />
           </ErrorBoundary>
           {state.phase === 'her_sent' && (
-            <div className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-primary bg-[#e8f0fe] border-t border-[#d0dff5]">
+            <div
+              className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-primary bg-[#e8f0fe] border-t border-[#d0dff5] cursor-pointer"
+              onClick={() => {
+                triggerAI();
+                if (isMobile) setMobileTab('ai');
+              }}
+            >
               <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-              <span>点击「AI 辅助」获取回复建议</span>
+              <span>点击此处获取 AI 回复建议</span>
             </div>
           )}
           <MessageInput
@@ -421,13 +429,18 @@ function AppContent() {
         onSave={handleSaveTarget}
       />
 
-      {/* Analysis Drawer */}
-      <AnalysisDrawer
-        open={state.analysisDrawerOpen}
-        onClose={() => dispatch({ type: 'CLOSE_ANALYSIS_DRAWER' })}
-        analysisMode={state.analysisMode}
-        result={state.analysisResult}
+      {/* Analysis Modal */}
+      <AnalysisModal
+        open={analysisModalOpen}
+        onClose={() => setAnalysisModalOpen(false)}
         targetName={currentTarget?.name || ''}
+        activeDiagnosis={state.activeDiagnosis}
+        isDiagnosing={state.isDiagnosing}
+        onDiagnose={diagnoseTarget}
+        advisorResult={state.analysisResult as any}
+        isAnalyzing={state.isAnalyzing}
+        analysisMode={state.analysisMode}
+        onTriggerAnalysis={triggerAnalysis}
         history={state.analysisHistory}
         onSelectHistory={(record) => {
           try {

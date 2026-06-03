@@ -1,13 +1,13 @@
 import React from 'react';
 import { Avatar, Button, Popconfirm, Segmented } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import type { AiMode } from '../types';
+import type { GenerateMode } from '../types';
 
 interface ChatHeaderProps {
   targetName: string;
   onReset: () => void;
-  aiMode: AiMode;
-  onAiModeChange: (mode: AiMode) => void;
+  aiMode: GenerateMode;
+  onAiModeChange: (mode: GenerateMode) => void;
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onReset, aiMode, onAiModeChange }) => {
@@ -26,7 +26,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onReset, aiMode, on
         <Segmented
           size="small"
           value={isQuick ? 'quick' : 'full'}
-          onChange={(val) => onAiModeChange(val as AiMode)}
+          onChange={(val) => onAiModeChange(val as GenerateMode)}
           options={[
             { label: '完整', value: 'full' },
             { label: '快速', value: 'quick' },

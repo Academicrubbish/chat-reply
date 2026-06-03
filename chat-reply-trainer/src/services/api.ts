@@ -89,40 +89,39 @@ export type SSEEvent = {
   data: any;
 };
 
-export function generateReplyStream(
-  sessionId: string,
-  herMessage: string,
-  provider: string = 'zhipu',
+/** Common SSE stream helper — extracts fetch + ReadableStream + line-buffer parsing. */
+function sseStream(
+  url: string,
+  body: Record<string, unknown>,
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
-  mode: string = 'full',
 ): AbortController {
   const ctrl = new AbortController();
   const token = localStorage.getItem('token');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  fetch(`${BASE}/sessions/${sessionId}/generate`, {
+  fetch(`${BASE}${url}`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ herMessage, provider, mode }),
+    body: JSON.stringify(body),
     signal: ctrl.signal,
   }).then(async (res) => {
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      onError?.(new Error(body.error || `请求失败 (${res.status})`));
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      onError?.(new Error(data.error || `请求失败 (${res.status})`));
       return;
     }
     const reader = res.body?.getReader();
     if (!reader) return;
     const decoder = new TextDecoder();
     let buffer = '';
+    let currentEvent = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-      let currentEvent = '';
       for (const line of lines) {
         if (line.startsWith('event: ')) {
           currentEvent = line.slice(7).trim();
@@ -131,7 +130,7 @@ export function generateReplyStream(
             const data = JSON.parse(line.slice(6));
             onEvent({ event: currentEvent, data });
           } catch {
-            // skip
+            // skip invalid JSON
           }
         }
       }
@@ -140,6 +139,17 @@ export function generateReplyStream(
     if (err.name !== 'AbortError') onError?.(err);
   });
   return ctrl;
+}
+
+export function generateReplyStream(
+  sessionId: string,
+  herMessage: string,
+  provider: string = 'zhipu',
+  onEvent: (evt: SSEEvent) => void,
+  onError?: (err: Error) => void,
+  mode: string = 'full',
+): AbortController {
+  return sseStream(`/sessions/${sessionId}/generate`, { herMessage, provider, mode }, onEvent, onError);
 }
 
 export const selectReply = (sessionId: string, replyId: number, aiMessageId?: string) =>
@@ -166,49 +176,7 @@ export function regenerateStream(
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
-  const ctrl = new AbortController();
-  const token = localStorage.getItem('token');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  fetch(`${BASE}/sessions/${sessionId}/regenerate`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(opts),
-    signal: ctrl.signal,
-  }).then(async (res) => {
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      onError?.(new Error(body.error || `请求失败 (${res.status})`));
-      return;
-    }
-    const reader = res.body?.getReader();
-    if (!reader) return;
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      let currentEvent = '';
-      for (const line of lines) {
-        if (line.startsWith('event: ')) {
-          currentEvent = line.slice(7).trim();
-        } else if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            onEvent({ event: currentEvent, data });
-          } catch {
-            // skip
-          }
-        }
-      }
-    }
-  }).catch(err => {
-    if (err.name !== 'AbortError') onError?.(err);
-  });
-  return ctrl;
+  return sseStream(`/sessions/${sessionId}/regenerate`, opts, onEvent, onError);
 }
 
 export const getReplySelections = (sessionId: string) =>
@@ -221,46 +189,7 @@ export function analyzeStream(
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
-  const ctrl = new AbortController();
-  const token = localStorage.getItem('token');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  fetch(`${BASE}/sessions/${sessionId}/analyze`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ mode, provider }),
-    signal: ctrl.signal,
-  }).then(async (res) => {
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({ error: '请求失败' }));
-      onError?.(new Error(data.error || '分析失败'));
-      return;
-    }
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentEvent = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
-        else if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            onEvent({ event: currentEvent, data });
-          } catch {}
-        }
-      }
-    }
-  }).catch((err) => {
-    if (err.name !== 'AbortError') onError?.(err);
-  });
-  return ctrl;
+  return sseStream(`/sessions/${sessionId}/analyze`, { mode, provider }, onEvent, onError);
 }
 
 export const getAnalyses = (targetId: string, type?: 'advisor' | 'review') =>
@@ -295,46 +224,7 @@ export function diagnoseStream(
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
-  const ctrl = new AbortController();
-  const token = localStorage.getItem('token');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  fetch(`${BASE}/targets/${targetId}/diagnose`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ provider }),
-    signal: ctrl.signal,
-  }).then(async (res) => {
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({ error: '请求失败' }));
-      onError?.(new Error(data.error || '诊断失败'));
-      return;
-    }
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentEvent = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
-        else if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            onEvent({ event: currentEvent, data });
-          } catch {}
-        }
-      }
-    }
-  }).catch((err) => {
-    if (err.name !== 'AbortError') onError?.(err);
-  });
-  return ctrl;
+  return sseStream(`/targets/${targetId}/diagnose`, { provider }, onEvent, onError);
 }
 
 // Knowledge base

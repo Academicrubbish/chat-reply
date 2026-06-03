@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button, Progress, Select, Tag, Tooltip, Popconfirm } from 'antd';
 import { EditOutlined, RobotOutlined, PlusOutlined, UnorderedListOutlined, DeleteOutlined, BulbOutlined, BarChartOutlined, HistoryOutlined, AimOutlined } from '@ant-design/icons';
-import type { ChatTarget, AISession, ModelOption, AnalysisData, AiMode, TargetDiagnosis } from '../types';
+import type { ChatTarget, AISession, ModelOption, AnalysisData, GenerateMode, TargetDiagnosis } from '../types';
 
 const tagColorMap: Record<string, string> = {
   aggressive: 'red', moderate: 'blue', conservative: 'green',
@@ -19,7 +19,7 @@ interface ToolbarProps {
   // AI
   onAIAssist: () => void;
   isGenerating: boolean;
-  aiMode: AiMode;
+  aiMode: GenerateMode;
   // Session
   session: AISession | null;
   sessions: AISession[];
@@ -32,7 +32,7 @@ interface ToolbarProps {
   onSelectProvider?: (provider: string) => void;
   // Analysis
   onTriggerAnalysis?: (mode: 'advisor' | 'review') => void;
-  onShowHistory?: () => void;
+  onOpenAnalysisModal?: () => void;
   isAnalyzing?: boolean;
   analysisMode?: 'advisor' | 'review' | null;
   // Context
@@ -47,7 +47,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   target, onEditTarget, onAIAssist, isGenerating, aiMode,
   session, sessions, onSelectSession, onCreateSession, onDeleteSession,
   models = [], selectedProvider = 'zhipu', onSelectProvider,
-  onTriggerAnalysis, onShowHistory, isAnalyzing = false, analysisMode = null,
+  onTriggerAnalysis, onOpenAnalysisModal, isAnalyzing = false, analysisMode = null,
   analysis, activeDiagnosis, isDiagnosing = false, onDiagnose,
 }) => {
   const currentIndex = session ? sessions.findIndex(s => s.id === session.id) : -1;
@@ -93,7 +93,11 @@ const Toolbar: React.FC<ToolbarProps> = ({
                 {analysis?.signal && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.signal}</Tag>}
                 {analysis?.strategy && <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>{analysis.strategy}</Tag>}
                 {activeDiagnosis && (
-                  <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                  <Tag
+                    color="purple"
+                    style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, cursor: 'pointer' }}
+                    onClick={onOpenAnalysisModal}
+                  >
                     {activeDiagnosis.stage} · {activeDiagnosis.strategy}
                   </Tag>
                 )}
@@ -134,41 +138,27 @@ const Toolbar: React.FC<ToolbarProps> = ({
           />
         </div>
 
-        {onDiagnose && (
-          <Tooltip title={activeDiagnosis ? `当前方案：${activeDiagnosis.stage} - ${activeDiagnosis.action}` : '基于聊天记录制定诊断方案，回复将围绕方案方向生成'}>
+        {onOpenAnalysisModal && (
+          <Tooltip title={activeDiagnosis ? `当前方案：${activeDiagnosis.stage} - ${activeDiagnosis.action}` : '查看或制定聊天方案'}>
             <Button size="small"
               type={activeDiagnosis ? 'default' : 'primary'}
               icon={<AimOutlined />}
               loading={isDiagnosing}
-              onClick={onDiagnose}
+              onClick={onOpenAnalysisModal}
             >
-              {activeDiagnosis ? '重新诊断' : '制定方案'}
+              {activeDiagnosis ? '查看方案' : '制定方案'}
             </Button>
           </Tooltip>
         )}
 
         {onTriggerAnalysis && (
-          <>
-            <Tooltip title="分析对方态度、情绪、想法，给出下一步方案">
-              <Button size="small" icon={<BulbOutlined />}
-                loading={isAnalyzing && analysisMode === 'advisor'}
-                disabled={isAnalyzing}
-                onClick={() => onTriggerAnalysis('advisor')}
-              >军师</Button>
-            </Tooltip>
-            <Tooltip title="复盘聊天亮点与踩坑，帮助提升技巧">
-              <Button size="small" icon={<BarChartOutlined />}
-                loading={isAnalyzing && analysisMode === 'review'}
-                disabled={isAnalyzing}
-                onClick={() => onTriggerAnalysis('review')}
-              >复盘</Button>
-            </Tooltip>
-            {onShowHistory && (
-              <Tooltip title="查看历史分析记录">
-                <Button size="small" icon={<HistoryOutlined />} onClick={onShowHistory} />
-              </Tooltip>
-            )}
-          </>
+          <Tooltip title="复盘聊天亮点与踩坑，帮助提升技巧">
+            <Button size="small" icon={<BarChartOutlined />}
+              loading={isAnalyzing && analysisMode === 'review'}
+              disabled={isAnalyzing}
+              onClick={() => onTriggerAnalysis('review')}
+            >复盘</Button>
+          </Tooltip>
         )}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>

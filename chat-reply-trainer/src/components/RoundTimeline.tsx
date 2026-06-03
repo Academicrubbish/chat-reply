@@ -24,6 +24,7 @@ interface RoundTimelineProps {
   onSelectReply: (reply: ReplyOption, aiMessageId?: string) => void;
   onCustomReply: (text: string) => void;
   onRegenerate: () => void;
+  onCancel?: () => void;
   onFeedback: (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => void;
 }
 
@@ -283,6 +284,7 @@ function CurrentRoundCard({
   onSelectReply,
   onCustomReply,
   onRegenerate,
+  onCancel,
   onFeedback,
 }: {
   analysis: AnalysisData | null;
@@ -297,6 +299,7 @@ function CurrentRoundCard({
   onSelectReply: (reply: ReplyOption, aiMessageId?: string) => void;
   onCustomReply: (text: string) => void;
   onRegenerate: () => void;
+  onCancel?: () => void;
   onFeedback: (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => void;
 }) {
   const [customText, setCustomText] = useState('');
@@ -309,6 +312,11 @@ function CurrentRoundCard({
     return (
       <Card size="small" style={{ borderLeft: '3px solid #3b5998' }}>
         <ThoughtChainSteps currentStep={generationStep} />
+        {onCancel && (
+          <Button size="small" danger onClick={onCancel} style={{ marginTop: 8 }}>
+            取消生成
+          </Button>
+        )}
         {streamingText && generationStep === 'parsing' && (() => {
           const match = streamingText.match(/"signalText"\s*:\s*"([\s\S]*?)"/);
           const displayText = match ? match[1].replace(/\\n/g, ' ').trim() : '';
@@ -382,6 +390,11 @@ function CurrentRoundCard({
           <div style={{ width: '100%', maxWidth: 260 }}>
             <ThoughtChainSteps currentStep={generationStep} />
           </div>
+          {onCancel && (
+            <Button size="small" danger onClick={onCancel} style={{ marginTop: 12 }}>
+              取消生成
+            </Button>
+          )}
         </div>
       )}
 
@@ -414,7 +427,7 @@ function CurrentRoundCard({
       {/* Reply cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(replies ?? []).map(reply => (
-          <FeedbackReplyCard key={reply.id} reply={reply} onSelectReply={(r) => onSelectReply(r, currentAiMessageId)} onFeedback={onFeedback} />
+          <FeedbackReplyCard key={`${currentAiMessageId}-${reply.id}`} reply={reply} onSelectReply={(r) => onSelectReply(r, currentAiMessageId)} onFeedback={onFeedback} />
         ))}
       </div>
 
@@ -540,6 +553,7 @@ const RoundTimeline = React.memo(function RoundTimeline({
   onSelectReply,
   onCustomReply,
   onRegenerate,
+  onCancel,
   onFeedback,
 }: RoundTimelineProps) {
   const rawRounds = useMemo(() => parseAiMessages(aiMessages), [aiMessages]);
@@ -578,6 +592,7 @@ const RoundTimeline = React.memo(function RoundTimeline({
         onSelectReply={onSelectReply}
         onCustomReply={onCustomReply}
         onRegenerate={onRegenerate}
+        onCancel={onCancel}
         onFeedback={onFeedback}
       />
     </div>

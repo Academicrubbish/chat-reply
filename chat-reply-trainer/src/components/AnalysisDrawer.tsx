@@ -1,7 +1,7 @@
-import React from 'react';
-import { Drawer, Card, Tag, Collapse, Empty, Divider, Tooltip } from 'antd';
-import { LikeOutlined, WarningOutlined, BulbOutlined, AimOutlined, HeartOutlined, SmileOutlined, CheckCircleFilled, LoadingOutlined, HistoryOutlined, SafetyCertificateOutlined, RadarChartOutlined } from '@ant-design/icons';
-import type { AdvisorAnalysis, ReviewAnalysis, ReviewScores, AnalysisRecord } from '../types';
+import React, { useState } from 'react';
+import { Drawer, Card, Tag, Collapse, Empty, Divider, Tooltip, Modal, Tabs, Button, Descriptions, Spin } from 'antd';
+import { LikeOutlined, WarningOutlined, BulbOutlined, AimOutlined, HeartOutlined, SmileOutlined, CheckCircleFilled, LoadingOutlined, HistoryOutlined, SafetyCertificateOutlined, RadarChartOutlined, BarChartOutlined } from '@ant-design/icons';
+import type { AdvisorAnalysis, ReviewAnalysis, ReviewScores, AnalysisRecord, TargetDiagnosis } from '../types';
 
 // ===== Analysis Step Chain =====
 type AnalysisStep = 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
@@ -482,7 +482,11 @@ const AnalysisDrawer: React.FC<AnalysisDrawerProps> = ({
         ) : (
           <ReviewView data={result as ReviewAnalysis} />
         )
-      ) : history.length > 0 ? null : (
+      ) : history.length > 0 ? (
+        <div style={{ textAlign: 'center', padding: '20px 0', color: '#999', fontSize: 13 }}>
+          点击下方历史记录查看分析结果
+        </div>
+      ) : (
         <Empty description="暂无分析结果" />
       )}
 
@@ -492,3 +496,220 @@ const AnalysisDrawer: React.FC<AnalysisDrawerProps> = ({
 };
 
 export default AnalysisDrawer;
+
+// ===== Diagnosis Tab =====
+function DiagnosisTab({
+  diagnosis,
+  isDiagnosing,
+  onDiagnose,
+}: {
+  diagnosis: TargetDiagnosis | null;
+  isDiagnosing: boolean;
+  onDiagnose: () => void;
+}) {
+  if (isDiagnosing) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 0' }}>
+        <Spin size="large" />
+        <div style={{ marginTop: 16, color: '#999' }}>正在制定方案...</div>
+      </div>
+    );
+  }
+
+  if (!diagnosis) {
+    return (
+      <Empty description="暂无诊断方案">
+        <Button type="primary" onClick={onDiagnose}>
+          立即制定方案
+        </Button>
+      </Empty>
+    );
+  }
+
+  return (
+    <div>
+      <Descriptions column={2} bordered size="small">
+        <Descriptions.Item label="关系阶段">
+          <Tag color="blue">{diagnosis.stage}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="推荐策略">
+          <Tag color="green">{diagnosis.strategy}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="对方态度">{diagnosis.attitude_level}</Descriptions.Item>
+        <Descriptions.Item label="情绪状态">{diagnosis.emotion_type}</Descriptions.Item>
+        <Descriptions.Item label="语言模式">{diagnosis.language_pattern}</Descriptions.Item>
+        <Descriptions.Item label="情绪倾向">
+          <Tag color={diagnosis.emotion_valence === '正向' ? 'green' : diagnosis.emotion_valence === '负向' ? 'red' : 'default'}>
+            {diagnosis.emotion_valence}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="可升级">
+          <Tag color={diagnosis.upgrade_ready ? 'green' : 'default'}>
+            {diagnosis.upgrade_ready ? '是' : '否'}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="升级原因">{diagnosis.upgrade_reason || '—'}</Descriptions.Item>
+        <Descriptions.Item label="建议行动" span={2}>{diagnosis.action}</Descriptions.Item>
+      </Descriptions>
+
+      {diagnosis.warnings?.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+            <WarningOutlined style={{ marginRight: 4, color: '#fa8c16' }} />注意事项
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {diagnosis.warnings.map((w, i) => (
+              <Tag key={i} color="warning">{w}</Tag>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {diagnosis.knowledgeIds?.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+            <SafetyCertificateOutlined style={{ marginRight: 4, color: '#1677ff' }} />关联知识
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {diagnosis.knowledgeIds.map((kid) => <KnowledgeTag key={kid} id={kid} />)}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16, textAlign: 'right' }}>
+        <Button onClick={onDiagnose} loading={isDiagnosing}>重新诊断</Button>
+      </div>
+    </div>
+  );
+}
+
+// ===== Unified Analysis Modal =====
+export interface AnalysisModalProps {
+  open: boolean;
+  onClose: () => void;
+  targetName: string;
+  // Diagnosis
+  activeDiagnosis: TargetDiagnosis | null;
+  isDiagnosing: boolean;
+  onDiagnose: () => void;
+  // Advisor analysis
+  advisorResult: AdvisorAnalysis | null;
+  isAnalyzing: boolean;
+  analysisMode: 'advisor' | 'review' | null;
+  onTriggerAnalysis: (mode: 'advisor' | 'review') => void;
+  // History
+  history: AnalysisRecord[];
+  onSelectHistory: (record: AnalysisRecord) => void;
+}
+
+export const AnalysisModal: React.FC<AnalysisModalProps> = ({
+  open, onClose, targetName,
+  activeDiagnosis, isDiagnosing, onDiagnose,
+  advisorResult, isAnalyzing, analysisMode, onTriggerAnalysis,
+  history, onSelectHistory,
+}) => {
+  const [activeTab, setActiveTab] = useState('diagnosis');
+
+  // Filter history by type
+  const advisorHistory = history.filter(h => h.msg_type === 'advisor');
+  const reviewHistory = history.filter(h => h.msg_type === 'review');
+
+  // Get latest review from history if not currently analyzing
+  const latestReviewRecord = reviewHistory[0];
+  const latestReviewResult = latestReviewRecord
+    ? (() => { try { return JSON.parse(latestReviewRecord.content) as ReviewAnalysis; } catch { return null; } })()
+    : null;
+
+  const handleSelectHistory = (record: AnalysisRecord) => {
+    onSelectHistory(record);
+    if (record.msg_type === 'advisor') setActiveTab('advisor');
+    else if (record.msg_type === 'review') setActiveTab('review');
+  };
+
+  return (
+    <Modal
+      title={`${targetName} 的分析方案`}
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={640}
+      styles={{ body: { padding: '12px 0', maxHeight: '70vh', overflowY: 'auto' } }}
+    >
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        style={{ padding: '0 24px' }}
+        items={[
+          {
+            key: 'diagnosis',
+            label: (
+              <span>
+                <AimOutlined /> 定制方案
+                {activeDiagnosis && <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>已制定</Tag>}
+              </span>
+            ),
+            children: (
+              <DiagnosisTab
+                diagnosis={activeDiagnosis}
+                isDiagnosing={isDiagnosing}
+                onDiagnose={onDiagnose}
+              />
+            ),
+          },
+          {
+            key: 'advisor',
+            label: (
+              <span>
+                <BulbOutlined /> 军师分析
+                {isAnalyzing && analysisMode === 'advisor' && <LoadingOutlined style={{ marginLeft: 4, color: '#1677ff' }} spin />}
+              </span>
+            ),
+            children: (
+              <div>
+                {isAnalyzing && analysisMode === 'advisor' ? (
+                  <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                    <Spin size="large" />
+                    <div style={{ marginTop: 16, color: '#999' }}>军师分析中...</div>
+                  </div>
+                ) : advisorResult ? (
+                  <AdvisorView data={advisorResult} />
+                ) : (
+                  <Empty description="暂无军师分析">
+                    <Button onClick={() => onTriggerAnalysis('advisor')}>开始分析</Button>
+                  </Empty>
+                )}
+                <HistoryList history={advisorHistory} onSelect={handleSelectHistory} />
+              </div>
+            ),
+          },
+          {
+            key: 'review',
+            label: (
+              <span>
+                <BarChartOutlined /> 总结复盘
+                {isAnalyzing && analysisMode === 'review' && <LoadingOutlined style={{ marginLeft: 4, color: '#1677ff' }} spin />}
+              </span>
+            ),
+            children: (
+              <div>
+                {isAnalyzing && analysisMode === 'review' ? (
+                  <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                    <Spin size="large" />
+                    <div style={{ marginTop: 16, color: '#999' }}>复盘总结中...</div>
+                  </div>
+                ) : latestReviewResult ? (
+                  <ReviewView data={latestReviewResult} />
+                ) : (
+                  <Empty description="暂无复盘总结">
+                    <Button onClick={() => onTriggerAnalysis('review')}>开始复盘</Button>
+                  </Empty>
+                )}
+                <HistoryList history={reviewHistory} onSelect={handleSelectHistory} />
+              </div>
+            ),
+          },
+        ]}
+      />
+    </Modal>
+  );
+};

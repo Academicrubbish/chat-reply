@@ -105,7 +105,9 @@ export interface GenerateResponse {
   version?: number;
 }
 
-export type AiMode = 'full' | 'quick' | 'advisor' | 'review';
+export type GenerateMode = 'full' | 'quick';
+export type AnalysisMode = 'advisor' | 'review';
+export type AiMode = GenerateMode | AnalysisMode;
 
 export interface AdvisorAnalysis {
   attitude: { status: string; level?: string; languagePattern?: string; detail: string; evidence: string };
@@ -217,6 +219,7 @@ export type AppAction =
   | { type: 'STREAM_REPLY_READY'; reply: ReplyOption; index: number }
   | { type: 'GENERATE_SUCCESS'; data: GenerateResponse }
   | { type: 'GENERATE_FAILURE'; error: string }
+  | { type: 'CANCEL_GENERATION' }
   | { type: 'SELECT_REPLY'; message: ChatMessage }
   | { type: 'CUSTOM_REPLY'; message: ChatMessage }
   | { type: 'UPDATE_SESSIONS'; sessions: AISession[]; currentSessionId: string | null }

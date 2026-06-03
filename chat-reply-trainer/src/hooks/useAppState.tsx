@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useRef, useEffect, useState, type Dispatch, type ReactNode } from 'react';
-import type { AppState, AppAction, ChatMessage, ModelOption, GenerationStep } from '../types';
+import type { AppState, AppAction, ChatMessage, ModelOption, GenerationStep, GenerateMode } from '../types';
 import * as api from '../services/api';
 
 const STEP_ORDER: Record<string, number> = { idle: 0, analyze: 1, generating: 2, parsing: 3, done: 4 };
@@ -108,6 +108,14 @@ function reducer(state: AppState, action: AppAction): AppState {
     }
     case 'GENERATE_FAILURE':
       return { ...state, phase: 'waiting_select', generationStep: 'idle', streamingText: '', error: action.error };
+    case 'CANCEL_GENERATION':
+      return {
+        ...state,
+        phase: state.replyVersions.length > 0 ? 'waiting_select' : 'idle',
+        generationStep: 'idle',
+        streamingText: '',
+        error: null,
+      };
     case 'STREAM_ANALYSIS': {
       const newHistory = [...state.favorabilityHistory, {
         value: action.analysis.favorability,
@@ -333,8 +341,8 @@ interface AppContextValue {
   models: ModelOption[];
   selectedProvider: string;
   setSelectedProvider: (provider: string) => void;
-  aiMode: 'full' | 'quick' | 'advisor' | 'review';
-  setAiMode: (mode: 'full' | 'quick' | 'advisor' | 'review') => void;
+  aiMode: GenerateMode;
+  setAiMode: (mode: GenerateMode) => void;
   triggerAnalysis: (mode: 'advisor' | 'review') => Promise<void>;
   diagnoseTarget: () => Promise<void>;
   clearDiagnosis: () => Promise<void>;
@@ -347,7 +355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeAbortRef = useRef<AbortController | null>(null);
   const [selectedProvider, setSelectedProvider] = useState('zhipu');
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [aiMode, setAiMode] = useState<'full' | 'quick' | 'advisor' | 'review'>('full');
+  const [aiMode, setAiMode] = useState<GenerateMode>('full');
 
   useEffect(() => {
     api.getModels().then(({ models }) => setModels(models)).catch(() => {});
