@@ -20,6 +20,19 @@ interface PromptParams {
   planNextStep: string;
   feedbackPreferences: string;
   contextSummary?: string;
+  diagnosis?: {
+    stage: string;
+    attitude_level: string;
+    language_pattern: string;
+    emotion_type: string;
+    emotion_valence: string;
+    upgrade_ready: boolean;
+    upgrade_reason: string;
+    warnings: string[];
+    action: string;
+    strategy: string;
+    knowledgeIds: string[];
+  } | null;
 }
 
 interface AdvisorPromptParams {
@@ -219,40 +232,70 @@ export function getFullStaticPrefixOptimized(): string {
 6. 用表达自己来代替评价对方（安全法则）`;
 }
 
-/** 按需注入版 full messages（静态角色+红线 | 动态知识+上下文） */
+/** 诊断驱动的回复生成 prompt（静态角色+红线 | 动态诊断+知识+上下文） */
 export function buildFullMessagesOptimized(params: PromptParams): Array<{ role: string; content: string }> {
-  const { target, recentMessages, planGoal, planNextStep, feedbackPreferences } = params;
+  const { target, recentMessages, feedbackPreferences, diagnosis } = params;
   const chatHistory = formatChatHistory(recentMessages);
 
-  // 获取对方最新消息用于关键词匹配
-  const lastHerMsg = [...recentMessages].reverse().find(m => m.role === 'her');
-  const lastMessage = lastHerMsg?.text || '';
-
-  // 按需选择知识单元
+  // 知识选择：基于诊断的 knowledgeIds 精准加载
   const allUnits = getUnitsForMode('full');
-  const selectedUnits = selectRelevantUnits(allUnits, lastMessage, 'full');
+  let selectedUnits: KnowledgeUnit[];
+
+  if (diagnosis?.knowledgeIds?.length) {
+    // 诊断路径：只用诊断指定的知识单元
+    const unitMap = new Map(allUnits.map(u => [u.id, u]));
+    selectedUnits = diagnosis.knowledgeIds
+      .map(id => unitMap.get(id))
+      .filter((u): u is KnowledgeUnit => u !== undefined);
+    // 确保核心单元 F01/F03 始终存在
+    for (const coreId of CORE_UNIT_IDS) {
+      if (!selectedUnits.some(u => u.id === coreId)) {
+        const core = unitMap.get(coreId);
+        if (core) selectedUnits.unshift(core);
+      }
+    }
+  } else {
+    // 兜底：关键词匹配
+    const lastHerMsg = [...recentMessages].reverse().find(m => m.role === 'her');
+    selectedUnits = selectRelevantUnits(allUnits, lastHerMsg?.text || '', 'full');
+  }
+
   const knowledge = formatSelectedKnowledge(selectedUnits, 'full');
+  console.log(`[Prompt] Selected ${selectedUnits.length}/${allUnits.length} knowledge units via diagnosis: ${selectedUnits.map(u => u.id).join(',')}`);
 
-  console.log(`[Prompt] Selected ${selectedUnits.length}/${allUnits.length} knowledge units: ${selectedUnits.map(u => u.id).join(',')}`);
+  // 诊断摘要上下文
+  const diagnosisSection = diagnosis ? `
+## 当前诊断方案（已由军师分析确定，请严格遵循）
 
-  // 动态 system = 知识 + 上下文 + 输出要求
+- 关系阶段：${diagnosis.stage}
+- 对方态度：${diagnosis.attitude_level}
+- 语言模式：${diagnosis.language_pattern}
+- 情绪状态：${diagnosis.emotion_type}（${diagnosis.emotion_valence}）
+- 推荐策略：${diagnosis.strategy}
+- 下一步行动：${diagnosis.action}
+- 升级条件：${diagnosis.upgrade_ready ? '✅ 满足' : '❌ 暂不满足'} — ${diagnosis.upgrade_reason}
+${diagnosis.warnings?.length ? `- ⚠️ 注意事项：${diagnosis.warnings.join('；')}` : ''}
+` : '';
+
+  // 动态 system = 知识 + 诊断 + 上下文 + 输出要求
   const context = buildContextBlock(target, chatHistory, {
     '语气偏好': toneMapFull[target.tone_level] || '适中',
     '目标意图': goalMap[target.goal_intent] || '正在追求对方',
     '话题禁区': target.forbidden_topics || '无',
-    '当前目标': planGoal || '探索阶段，建立舒适感',
-    '下一步建议': planNextStep || '自然对话，寻找共同话题',
   });
   const feedback = feedbackPreferences ? `\n## 历史反馈偏好\n${feedbackPreferences}\n` : '';
 
-  const dynamicContent = `# 知识体系\n\n${knowledge}\n\n${context}
+  const dynamicContent = `# 知识体系\n\n${knowledge}\n
+${diagnosisSection}
+${context}
 ${feedback}# 输出要求
 
-分析对方最新消息，返回JSON：
-{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+根据诊断方案，针对对方最新消息生成回复。只返回JSON：
+{"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由（1句话说明为什么符合诊断方向）","knowledgeId":"对应的知识单元ID"}]}
 
 要求：
 - 生成3-4条回复，风格各异，至少1条安全回复
+- 所有回复必须符合诊断方案中的策略方向和注意事项
 - 回复口语化自然，长度与对方发言匹配
 - 每条标注策略名、理由和对应的知识单元ID
 - 遵守语气偏好和话题禁区

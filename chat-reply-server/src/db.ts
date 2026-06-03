@@ -334,6 +334,28 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_warnings_user_target ON user_warnings(user_id, target_id, warning_type);
   `);
 
+  // Migrate: add active_diagnosis_id to chat_targets (diagnosis-first architecture)
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_targets ADD COLUMN active_diagnosis_id TEXT DEFAULT NULL`);
+  } catch {}
+
+  // Migrate: add diagnosis_id to ai_sessions (track which diagnosis was used)
+  try {
+    dbWrapper.exec(`ALTER TABLE ai_sessions ADD COLUMN diagnosis_id TEXT DEFAULT NULL`);
+  } catch {}
+
+  // One-time: auto-activate the latest diagnosis for existing targets
+  try {
+    dbWrapper.exec(`
+      UPDATE chat_targets SET active_diagnosis_id = (
+        SELECT id FROM chat_diagnoses
+        WHERE chat_diagnoses.target_id = chat_targets.id
+        ORDER BY created_at DESC LIMIT 1
+      ) WHERE active_diagnosis_id IS NULL
+        AND EXISTS (SELECT 1 FROM chat_diagnoses WHERE chat_diagnoses.target_id = chat_targets.id)
+    `);
+  } catch {}
+
   dbReady = true;
 }
 

@@ -40,12 +40,12 @@ export function getAvailableModels(): { provider: string; label: string; model: 
     .map(m => ({ provider: m.provider, label: m.label, model: process.env[m.modelEnv] || '' }));
 }
 
-export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu'): Promise<string> {
+export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 4096): Promise<string> {
   const response = await getClient(provider).chat.completions.create({
     model: getModel(provider),
     messages: messages as any,
     temperature: 0.8,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
   });
   return response.choices[0].message.content || '';
 }

@@ -381,15 +381,11 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
-    // 合并查询：一次性取 target 和消息（verifyTargetOwnership 已验证 target 存在）
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(session.target_id, req.user.userId) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
 
     const now = Date.now();
-
-    // Read context (her message already saved by frontend via sendHerMessage)
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(target.id).reverse();
-    // 只取最近10条 ai_messages（5轮），避免多轮对话时 token 爆炸
     const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 10').all(session.id).reverse();
 
     // Build feedback preferences from ai_messages
@@ -400,10 +396,38 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       .map((f: any) => `用户对${f.strategy}策略反馈${f.rating === 'thumbs_up' ? '👍' : '👎'}`)
       .join('；');
 
-    // Build prompt params
-    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: feedbackPrefs } as any;
+    // SSE headers
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
-    // 拆分版：静态 system（可被 API 缓存）+ 动态 system（每次变化）
+    // ===== Diagnosis-first: ensure diagnosis exists =====
+    let diagnosis: any = null;
+    if (target.active_diagnosis_id) {
+      const d = db.prepare('SELECT * FROM chat_diagnoses WHERE id = ?').get(target.active_diagnosis_id) as any;
+      if (d) {
+        diagnosis = {
+          ...d,
+          warnings: JSON.parse(d.warnings_json || '[]'),
+          knowledgeIds: JSON.parse(d.knowledge_ids || '[]'),
+        };
+      }
+    }
+
+    // No diagnosis: auto-diagnose first (non-SSE, internal call)
+    if (!diagnosis) {
+      send('step', { step: 'auto_diagnosing' });
+      try {
+        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
+        send('diagnosis_ready', { diagnosis });
+      } catch (diagErr: any) {
+        console.error('[Auto-Diagnose Error]', diagErr.message);
+        // Diagnosis failed: still try to generate without diagnosis context
+      }
+    }
+
+    // Build prompt params with diagnosis
+    const promptParams = { target, recentMessages: recentMessages as any[], planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: feedbackPrefs, diagnosis };
+
     const baseMessages = isQuick
       ? buildQuickMessages({ ...promptParams, contextSummary: session.context_summary || '' })
       : buildFullMessagesOptimized(promptParams);
@@ -416,33 +440,15 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${herMessage}` });
 
-    // Estimate tokens: byte-based estimation handles mixed CJK/English well
-    // UTF-8: CJK = 3 bytes/char (~1.5 tokens), ASCII = 1 byte/char (~0.25 tokens)
-    // Empirically ~2 bytes per token is a good middle ground
     const totalText = conversationMessages.map(m => m.content).join('');
     const estimatedTokens = Math.ceil(Buffer.byteLength(totalText, 'utf-8') / 2);
 
-    // SSE headers
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    });
-
-    const send = (event: string, data: any) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
-
-    // Steps: quick mode skips analyze/parsing, goes straight to generating
+    // Stream reply generation
     if (!isQuick) send('step', { step: 'analyze' });
-
     let raw = '';
     send('step', { step: 'generating' });
 
-    // Heartbeat timer: send every 2s while stream is active
-    const heartbeatTimer = setInterval(() => {
-      send('heartbeat', { ts: Date.now() });
-    }, 2000);
+    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
 
     try {
       let sentReplyCount = 0;
@@ -450,7 +456,6 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
         raw += delta;
         send('delta', { text: delta });
 
-        // Quick mode only: progressively detect and send complete replies
         if (isQuick) {
           const newReplies = extractNewReplies(raw, sentReplyCount);
           for (const r of newReplies) {
@@ -466,9 +471,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       clearInterval(heartbeatTimer);
     }
 
-    // Step 3: Parse response with multi-round fallback
     if (!isQuick) send('step', { step: 'parsing' });
-
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
 
     let parsed = parseJsonSafely(raw);
@@ -478,7 +481,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       console.log('[LLM] Using safe fallback response');
     }
 
-    // Quick mode: normalize compact format (s/t → strategy/text)
+    // Quick mode: normalize compact format
     let quickCtx = '';
     if (isQuick) {
       const normalized = normalizeCompactResponse(parsed);
@@ -488,19 +491,8 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
     console.log('[LLM Parsed] keys:', Object.keys(parsed), 'replies count:', parsed.replies?.length ?? 0);
 
-    // Safety net: ensure analysis exists (prompt should provide it, but defend against AI non-compliance)
-    if (!parsed.analysis) {
-      parsed.analysis = {
-        stage: '分析中', signal: '模糊', strategy: '安全回复',
-        signalText: 'AI 未返回分析，已降级处理', emotions: [],
-        tip: '建议重新生成', favorability: 50, favorabilityReason: '',
-      };
-    }
-
-    // Send structured events — normal mode sends analysis/plan/replies; quick mode already sent reply_ready during streaming
+    // Send structured events (diagnosis-aware: only replies, no analysis/plan needed)
     if (!isQuick) {
-      if (parsed.analysis) send('analysis', parsed.analysis);
-      if (parsed.plan) send('plan', parsed.plan);
       send('replies', parsed.replies || []);
     }
 
@@ -517,15 +509,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       db.prepare('INSERT INTO ai_messages (id, session_id, role, content, round_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(assistantAiMsgId, session.id, 'assistant', JSON.stringify(parsed), roundId, 1, now + 1);
       const newRoundCount = session.round_count + 1;
-      const newPlanGoal = parsed.plan?.goal || session.plan_goal;
-      const newPlanNextStep = parsed.plan?.nextStep || session.plan_next_step;
-      // Quick mode: also save context_summary; normal mode: original SQL unchanged
+      const newPlanGoal = diagnosis?.action || session.plan_goal;
+      const newPlanNextStep = diagnosis?.strategy || session.plan_next_step;
       if (isQuick) {
-        db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ?, context_summary = ? WHERE id = ?')
-          .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, quickCtx || session.context_summary, session.id);
+        db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ?, context_summary = ?, diagnosis_id = ? WHERE id = ?')
+          .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, quickCtx || session.context_summary, diagnosis?.id || null, session.id);
       } else {
-        db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ? WHERE id = ?')
-          .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, session.id);
+        db.prepare('UPDATE ai_sessions SET round_count = ?, context_tokens = ?, plan_goal = ?, plan_next_step = ?, diagnosis_id = ? WHERE id = ?')
+          .run(newRoundCount, estimatedTokens, newPlanGoal, newPlanNextStep, diagnosis?.id || null, session.id);
       }
     })();
 
@@ -536,9 +527,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
       res.end();
-    } catch {
-      // connection already closed
-    }
+    } catch { /* connection already closed */ }
   }
 });
 
@@ -620,16 +609,36 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       .get(session.target_id) as any;
     if (!lastHerMsg) { res.status(400).json({ error: '没有对方消息' }); return; }
 
-    // 合并查询：带 user_id 验证
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(session.target_id, req.user.userId) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
     const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 15').all(session.target_id).reverse();
-    // 只取最近10条（5轮），与 generate 一致
     const aiMessages = db.prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 10').all(session.id).reverse();
 
-    const promptParams = { target, recentMessages, planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '' } as any;
+    // SSE headers
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
-    // 拆分版 messages（静态 + 动态），复用 generate 的优化逻辑
+    // ===== Diagnosis-first: ensure diagnosis exists =====
+    let diagnosis: any = null;
+    if (target.active_diagnosis_id) {
+      const d = db.prepare('SELECT * FROM chat_diagnoses WHERE id = ?').get(target.active_diagnosis_id) as any;
+      if (d) {
+        diagnosis = { ...d, warnings: JSON.parse(d.warnings_json || '[]'), knowledgeIds: JSON.parse(d.knowledge_ids || '[]') };
+      }
+    }
+
+    if (!diagnosis) {
+      send('step', { step: 'auto_diagnosing' });
+      try {
+        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
+        send('diagnosis_ready', { diagnosis });
+      } catch (diagErr: any) {
+        console.error('[Auto-Diagnose Error]', diagErr.message);
+      }
+    }
+
+    const promptParams = { target, recentMessages: recentMessages as any[], planGoal: session.plan_goal, planNextStep: session.plan_next_step, feedbackPreferences: '', diagnosis };
+
     const baseMessages = isQuick
       ? buildQuickMessages({ ...promptParams, contextSummary: session.context_summary || '' })
       : buildFullMessagesOptimized(promptParams);
@@ -638,10 +647,6 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       for (const aiMsg of aiMessages as any[]) { conversationMessages.push({ role: aiMsg.role as string, content: aiMsg.content as string }); }
     }
     conversationMessages.push({ role: 'user', content: `对方的最新消息是：${lastHerMsg.text}` });
-
-    // === 流式 SSE 输出（与 generate 一致） ===
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
     if (!isQuick) send('step', { step: 'analyze' });
     send('step', { step: 'generating' });
@@ -655,7 +660,6 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
         raw += delta;
         send('delta', { text: delta });
 
-        // Quick mode: progressively detect and send complete replies
         if (isQuick) {
           const newReplies = extractNewReplies(raw, sentReplyCount);
           for (const r of newReplies) {
@@ -679,7 +683,6 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       parsed = SAFE_FALLBACK;
     }
 
-    // Quick mode: normalize compact format
     let quickCtx = '';
     if (isQuick) {
       const normalized = normalizeCompactResponse(parsed);
@@ -687,19 +690,8 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       parsed = normalized;
     }
 
-    // Safety net: ensure analysis exists
-    if (!parsed.analysis) {
-      parsed.analysis = {
-        stage: '分析中', signal: '模糊', strategy: '安全回复',
-        signalText: 'AI 未返回分析，已降级处理', emotions: [],
-        tip: '建议重新生成', favorability: 50, favorabilityReason: '',
-      };
-    }
-
-    // Send structured events — normal mode sends analysis/plan/replies; quick mode already sent reply_ready during streaming
+    // Send structured events (diagnosis-aware: only replies)
     if (!isQuick) {
-      if (parsed.analysis) send('analysis', parsed.analysis);
-      if (parsed.plan) send('plan', parsed.plan);
       send('replies', parsed.replies || []);
     }
 
@@ -711,11 +703,11 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       .run(uuid(), session.id, 'assistant', JSON.stringify(parsed), roundId, nextVersion, Date.now());
 
     if (isQuick) {
-      db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ?, context_summary = ? WHERE id = ?')
-        .run(estimatedTokens, quickCtx || session.context_summary, session.id);
+      db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ?, context_summary = ?, diagnosis_id = ? WHERE id = ?')
+        .run(estimatedTokens, quickCtx || session.context_summary, diagnosis?.id || null, session.id);
     } else {
-      db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ? WHERE id = ?')
-        .run(estimatedTokens, session.id);
+      db.prepare('UPDATE ai_sessions SET round_count = round_count + 1, context_tokens = ?, diagnosis_id = ? WHERE id = ?')
+        .run(estimatedTokens, diagnosis?.id || null, session.id);
     }
 
     send('done', { contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) }, roundId, version: nextVersion });
@@ -725,11 +717,213 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
       res.end();
-    } catch {
-      // connection already closed
-    }
+    } catch { /* connection already closed */ }
   }
 });
+
+// ===== Diagnosis API (target-scoped, diagnosis-first architecture) =====
+
+// POST /api/targets/:targetId/diagnose — SSE stream, target-scoped diagnosis
+app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
+  try {
+    const { provider } = req.body;
+    const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.targetId, req.user.userId) as any;
+    if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+
+    const recentMessages = db.prepare('SELECT * FROM chat_messages WHERE target_id = ? ORDER BY created_at DESC LIMIT 30').all(target.id).reverse();
+    if (recentMessages.length < 2) { res.status(400).json({ error: '聊天记录太少，至少需要2条消息才能诊断' }); return; }
+
+    // SSE headers
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+
+    send('step', { step: 'analyzing' });
+
+    const systemPrompt = buildAdvisorPrompt({ target, recentMessages: recentMessages as any[], contextSummary: '' });
+    const conversationMessages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: '请分析对方当前的状态' },
+    ];
+
+    let raw = '';
+    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
+    try {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 8192)) {
+        raw += delta;
+        send('delta', { text: delta });
+      }
+    } finally {
+      clearInterval(heartbeatTimer);
+    }
+
+    send('step', { step: 'parsing' });
+    let parsed = parseJsonSafely(raw);
+    if (!parsed) {
+      console.error('[Diagnose Parse Error] Raw:', raw.slice(0, 500));
+      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Save to chat_diagnoses
+    const diag = parsed.diagnosis || {};
+    const diagId = uuid();
+    const now = Date.now();
+    db.prepare(`INSERT INTO chat_diagnoses (id, session_id, target_id, attitude_level, language_pattern, emotion_type, emotion_valence, stage, upgrade_ready, upgrade_reason, warnings_json, action, strategy, knowledge_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(diagId, '', target.id,
+        parsed.attitude?.level || '', parsed.attitude?.languagePattern || '',
+        parsed.emotion?.type || '', parsed.emotion?.valence || '',
+        diag.stage || '', diag.upgradeReady ? 1 : 0, diag.upgradeReason || '',
+        JSON.stringify(diag.warnings || []),
+        parsed.nextStep?.action || '', parsed.nextStep?.strategy || '',
+        JSON.stringify(diag.knowledgeIds || []), now);
+
+    // Set as active diagnosis
+    db.prepare('UPDATE chat_targets SET active_diagnosis_id = ? WHERE id = ?').run(diagId, target.id);
+
+    // Accumulate warnings
+    for (const w of (diag.warnings || [])) {
+      let wt = 'other';
+      if (/诚意陷阱|诚意/.test(w)) wt = 'sincerity_trap';
+      else if (/真命天女|迷恋/.test(w)) wt = 'oneitis';
+      else if (/因果链|放大/.test(w)) wt = 'causal_chain';
+      else if (/越级|操之过急/.test(w)) wt = 'over_escalation';
+      else if (/需求感|暴露/.test(w)) wt = 'neediness';
+      const existing = db.prepare('SELECT id, count FROM user_warnings WHERE user_id = ? AND target_id = ? AND warning_type = ?').get(req.user.userId, target.id, wt) as any;
+      if (existing) {
+        db.prepare('UPDATE user_warnings SET count = count + 1, detail = ?, updated_at = ? WHERE id = ?').run(w, now, existing.id);
+      } else {
+        db.prepare('INSERT INTO user_warnings (id, user_id, target_id, warning_type, detail, count, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(uuid(), req.user.userId, target.id, wt, w, now);
+      }
+    }
+
+    const diagnosis = {
+      id: diagId, target_id: target.id,
+      attitude_level: parsed.attitude?.level || '',
+      language_pattern: parsed.attitude?.languagePattern || '',
+      emotion_type: parsed.emotion?.type || '',
+      emotion_valence: parsed.emotion?.valence || '',
+      stage: diag.stage || '',
+      upgrade_ready: !!diag.upgradeReady,
+      upgrade_reason: diag.upgradeReason || '',
+      warnings: diag.warnings || [],
+      action: parsed.nextStep?.action || '',
+      strategy: parsed.nextStep?.strategy || '',
+      knowledgeIds: diag.knowledgeIds || [],
+      created_at: now,
+    };
+
+    send('diagnosis_done', { diagnosis });
+    res.end();
+  } catch (err: any) {
+    console.error('Diagnose error:', err);
+    try {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || '诊断服务异常' })}\n\n`);
+      res.end();
+    } catch { /* connection already closed */ }
+  }
+});
+
+// GET /api/targets/:targetId/active-diagnosis
+app.get('/api/targets/:targetId/active-diagnosis', (req: any, res: Response) => {
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.targetId, req.user.userId) as any;
+  if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+
+  if (!target.active_diagnosis_id) { res.json({ diagnosis: null }); return; }
+
+  const d = db.prepare('SELECT * FROM chat_diagnoses WHERE id = ?').get(target.active_diagnosis_id) as any;
+  if (!d) { res.json({ diagnosis: null }); return; }
+
+  res.json({
+    diagnosis: {
+      id: d.id, target_id: d.target_id,
+      attitude_level: d.attitude_level,
+      language_pattern: d.language_pattern,
+      emotion_type: d.emotion_type,
+      emotion_valence: d.emotion_valence,
+      stage: d.stage,
+      upgrade_ready: !!d.upgrade_ready,
+      upgrade_reason: d.upgrade_reason,
+      warnings: JSON.parse(d.warnings_json || '[]'),
+      action: d.action,
+      strategy: d.strategy,
+      knowledgeIds: JSON.parse(d.knowledge_ids || '[]'),
+      created_at: d.created_at,
+    },
+  });
+});
+
+// DELETE /api/targets/:targetId/active-diagnosis
+app.delete('/api/targets/:targetId/active-diagnosis', (req: any, res: Response) => {
+  const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.targetId, req.user.userId) as any;
+  if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+  db.prepare('UPDATE chat_targets SET active_diagnosis_id = NULL WHERE id = ?').run(target.id);
+  res.json({ success: true });
+});
+
+// ===== Internal helper: run diagnosis (non-SSE, used by generate/regenerate) =====
+
+async function runDiagnosisInternal(target: any, recentMessages: any[], provider: string): Promise<any> {
+  const systemPrompt = buildAdvisorPrompt({ target, recentMessages, contextSummary: '' });
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: '请分析对方当前的状态' },
+  ];
+
+  const raw = await chatCompletion(messages, provider, 8192);
+  let parsed = parseJsonSafely(raw);
+  if (!parsed) {
+    console.error('[Auto-Diagnose Parse Error] Raw:', raw.slice(0, 500));
+    throw new Error('自动诊断解析失败');
+  }
+
+  const diag = parsed.diagnosis || {};
+  const diagId = uuid();
+  const now = Date.now();
+
+  db.prepare(`INSERT INTO chat_diagnoses (id, session_id, target_id, attitude_level, language_pattern, emotion_type, emotion_valence, stage, upgrade_ready, upgrade_reason, warnings_json, action, strategy, knowledge_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(diagId, '', target.id,
+      parsed.attitude?.level || '', parsed.attitude?.languagePattern || '',
+      parsed.emotion?.type || '', parsed.emotion?.valence || '',
+      diag.stage || '', diag.upgradeReady ? 1 : 0, diag.upgradeReason || '',
+      JSON.stringify(diag.warnings || []),
+      parsed.nextStep?.action || '', parsed.nextStep?.strategy || '',
+      JSON.stringify(diag.knowledgeIds || []), now);
+
+  db.prepare('UPDATE chat_targets SET active_diagnosis_id = ? WHERE id = ?').run(diagId, target.id);
+
+  // Accumulate warnings
+  for (const w of (diag.warnings || [])) {
+    let wt = 'other';
+    if (/诚意陷阱|诚意/.test(w)) wt = 'sincerity_trap';
+    else if (/真命天女|迷恋/.test(w)) wt = 'oneitis';
+    else if (/因果链|放大/.test(w)) wt = 'causal_chain';
+    else if (/越级|操之过急/.test(w)) wt = 'over_escalation';
+    else if (/需求感|暴露/.test(w)) wt = 'neediness';
+    const existing = db.prepare('SELECT id, count FROM user_warnings WHERE user_id = ? AND target_id = ? AND warning_type = ?').get(target.user_id, target.id, wt) as any;
+    if (existing) {
+      db.prepare('UPDATE user_warnings SET count = count + 1, detail = ?, updated_at = ? WHERE id = ?').run(w, now, existing.id);
+    } else {
+      db.prepare('INSERT INTO user_warnings (id, user_id, target_id, warning_type, detail, count, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(uuid(), target.user_id, target.id, wt, w, now);
+    }
+  }
+
+  return {
+    id: diagId, target_id: target.id,
+    attitude_level: parsed.attitude?.level || '',
+    language_pattern: parsed.attitude?.languagePattern || '',
+    emotion_type: parsed.emotion?.type || '',
+    emotion_valence: parsed.emotion?.valence || '',
+    stage: diag.stage || '',
+    upgrade_ready: !!diag.upgradeReady,
+    upgrade_reason: diag.upgradeReason || '',
+    warnings: diag.warnings || [],
+    action: parsed.nextStep?.action || '',
+    strategy: parsed.nextStep?.strategy || '',
+    knowledgeIds: diag.knowledgeIds || [],
+    created_at: now,
+  };
+}
 
 // ===== Advisor Analysis & Review Summary =====
 app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => {
@@ -770,7 +964,7 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     let raw = '';
     const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 4096)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 8192)) {
         raw += delta;
         send('delta', { text: delta });
       }

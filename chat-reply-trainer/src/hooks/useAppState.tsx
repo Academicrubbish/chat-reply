@@ -31,6 +31,9 @@ const initialState: AppState = {
   isAnalyzing: false,
   analysisStep: 'idle' as const,
   analysisHistory: [],
+  activeDiagnosis: null,
+  isDiagnosing: false,
+  diagnosisStep: 'idle' as const,
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -57,6 +60,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         favorabilityHistory: [],
         replyVersions: [],
         activeVersionIndex: 0,
+        activeDiagnosis: null,
+        isDiagnosing: false,
+        diagnosisStep: 'idle' as const,
       };
     }
     case 'SEND_HER_MESSAGE':
@@ -280,6 +286,19 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, analysisHistory: action.history };
     case 'VIEW_HISTORY_ANALYSIS':
       return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, analysisDrawerOpen: true };
+    // Diagnosis actions
+    case 'SET_ACTIVE_DIAGNOSIS':
+      return { ...state, activeDiagnosis: action.diagnosis };
+    case 'TRIGGER_DIAGNOSE':
+      return { ...state, isDiagnosing: true, diagnosisStep: 'analyzing' as const, streamingText: '', error: null };
+    case 'DIAGNOSIS_SUCCESS':
+      return { ...state, isDiagnosing: false, diagnosisStep: 'done' as const, activeDiagnosis: action.diagnosis };
+    case 'DIAGNOSIS_FAILURE':
+      return { ...state, isDiagnosing: false, diagnosisStep: 'idle' as const, error: action.error };
+    case 'DIAGNOSIS_STEP':
+      return { ...state, diagnosisStep: action.step };
+    case 'CLEAR_DIAGNOSIS':
+      return { ...state, activeDiagnosis: null };
     default:
       return state;
   }
@@ -317,6 +336,8 @@ interface AppContextValue {
   aiMode: 'full' | 'quick' | 'advisor' | 'review';
   setAiMode: (mode: 'full' | 'quick' | 'advisor' | 'review') => void;
   triggerAnalysis: (mode: 'advisor' | 'review') => Promise<void>;
+  diagnoseTarget: () => Promise<void>;
+  clearDiagnosis: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -350,6 +371,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     // Load analysis history for this target
     api.getAnalyses(id).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
+    // Load active diagnosis for this target
+    api.getActiveDiagnosis(id).then(r => dispatch({ type: 'SET_ACTIVE_DIAGNOSIS', diagnosis: r.diagnosis })).catch(() => {});
   };
 
   const sendHerMessage = (text: string) => {
@@ -422,11 +445,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         switch (evt.event) {
           case 'step':
-            // Step transitions are driven by delta events on frontend; ignore backend step events
+            if (evt.data.step === 'auto_diagnosing') {
+              dispatch({ type: 'SET_GENERATION_STEP', step: 'analyze' });
+            }
             break;
           case 'delta':
             clearTimeout(analyzeTimer);
             dispatch({ type: 'STREAM_DELTA', text: evt.data.text });
+            break;
+          case 'diagnosis_ready':
+            dispatch({ type: 'SET_ACTIVE_DIAGNOSIS', diagnosis: evt.data.diagnosis });
             break;
           case 'analysis':
             dispatch({ type: 'STREAM_ANALYSIS', analysis: evt.data });
@@ -511,6 +539,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     activeAbortRef.current = ctrl;
   };
 
+  const diagnoseTarget = async () => {
+    if (!state.currentTargetId) return;
+    activeAbortRef.current?.abort();
+
+    dispatch({ type: 'TRIGGER_DIAGNOSE' });
+
+    const ctrl = api.diagnoseStream(
+      state.currentTargetId,
+      selectedProvider,
+      (evt) => {
+        if (evt.event === 'step') {
+          dispatch({ type: 'DIAGNOSIS_STEP', step: evt.data.step === 'analyzing' ? 'analyzing' : evt.data.step === 'parsing' ? 'parsing' : 'generating' });
+        } else if (evt.event === 'delta') {
+          // Optionally stream text during diagnosis
+        } else if (evt.event === 'diagnosis_done') {
+          dispatch({ type: 'DIAGNOSIS_SUCCESS', diagnosis: evt.data.diagnosis });
+        }
+      },
+      (err) => {
+        if (err.name !== 'AbortError') {
+          dispatch({ type: 'DIAGNOSIS_FAILURE', error: err.message });
+        }
+      },
+    );
+    activeAbortRef.current = ctrl;
+  };
+
+  const clearDiagnosis = async () => {
+    if (!state.currentTargetId) return;
+    try {
+      await api.clearActiveDiagnosis(state.currentTargetId);
+      dispatch({ type: 'CLEAR_DIAGNOSIS' });
+    } catch {}
+  };
+
   const selectReplyAction = async (reply: { id: number; text: string; strategy: string }, aiMessageId?: string) => {
     if (!state.currentSessionId || !state.currentTargetId) return;
     try {
@@ -576,7 +639,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, dispatch, selectTarget, sendHerMessage, triggerAI,
       selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
       models, selectedProvider, setSelectedProvider,
-      aiMode, setAiMode, triggerAnalysis,
+      aiMode, setAiMode, triggerAnalysis, diagnoseTarget, clearDiagnosis,
     }}>
       {children}
     </AppContext.Provider>
