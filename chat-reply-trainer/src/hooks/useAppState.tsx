@@ -35,6 +35,7 @@ const initialState: AppState = {
   isDiagnosing: false,
   diagnosisStep: 'idle' as const,
   diagnosisHistory: [],
+  errorTimestamp: null,
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -109,7 +110,16 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'GENERATE_FAILURE':
-      return { ...state, phase: 'waiting_select', generationStep: 'idle', streamingText: '', error: action.error };
+      return {
+        ...state,
+        phase: state.replyVersions.length > 0 ? 'waiting_select' : 'idle',
+        generationStep: 'idle',
+        streamingText: '',
+        currentReplies: state.replyVersions.length > 0 ? state.currentReplies : null,
+        currentAnalysis: state.replyVersions.length > 0 ? state.currentAnalysis : null,
+        error: action.error,
+        errorTimestamp: Date.now(),
+      };
     case 'CANCEL_GENERATION':
       return {
         ...state,
@@ -224,7 +234,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'SET_PLAN':
       return { ...state, currentPlan: action.plan };
     case 'SET_ERROR':
-      return { ...state, error: action.error };
+      return { ...state, error: action.error, errorTimestamp: Date.now() };
     case 'OPEN_MODAL':
       return { ...state, modalOpen: true, editingTarget: action.target || null };
     case 'CLOSE_MODAL':
@@ -283,7 +293,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'ANALYSIS_SUCCESS':
       return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisStep: 'idle' as const, analysisDrawerOpen: true };
     case 'ANALYSIS_FAILURE':
-      return { ...state, isAnalyzing: false, analysisStep: 'idle' as const, error: action.error };
+      return { ...state, isAnalyzing: false, analysisStep: 'idle' as const, error: action.error, errorTimestamp: Date.now() };
     case 'CLOSE_ANALYSIS_DRAWER':
       return { ...state, analysisDrawerOpen: false };
     case 'OPEN_ANALYSIS_DRAWER':
@@ -304,7 +314,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'DIAGNOSIS_SUCCESS':
       return { ...state, isDiagnosing: false, diagnosisStep: 'done' as const, activeDiagnosis: action.diagnosis };
     case 'DIAGNOSIS_FAILURE':
-      return { ...state, isDiagnosing: false, diagnosisStep: 'idle' as const, error: action.error };
+      return { ...state, isDiagnosing: false, diagnosisStep: 'idle' as const, error: action.error, errorTimestamp: Date.now() };
     case 'DIAGNOSIS_STEP':
       return { ...state, diagnosisStep: action.step };
     case 'CLEAR_DIAGNOSIS':
@@ -350,6 +360,8 @@ interface AppContextValue {
   triggerAnalysis: (mode: 'advisor' | 'review') => Promise<void>;
   diagnoseTarget: () => Promise<void>;
   clearDiagnosis: () => Promise<void>;
+  regenAbortRef: React.MutableRefObject<AbortController | null>;
+  abortAllStreams: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -357,21 +369,31 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const activeAbortRef = useRef<AbortController | null>(null);
+  const regenAbortRef = useRef<AbortController | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [selectedProvider, setSelectedProvider] = useState('zhipu');
   const [models, setModels] = useState<ModelOption[]>([]);
   const [aiMode, setAiMode] = useState<GenerateMode>('full');
+
+  // Unified abort: stops all in-flight SSE streams
+  const abortAllStreams = () => {
+    activeAbortRef.current?.abort();
+    activeAbortRef.current = null;
+    regenAbortRef.current?.abort();
+    regenAbortRef.current = null;
+  };
 
   useEffect(() => {
     api.getModels().then(({ models }) => setModels(models)).catch(() => {});
   }, []);
 
   // Cleanup: abort any in-flight SSE on unmount
-  useEffect(() => () => { activeAbortRef.current?.abort(); }, []);
+  useEffect(() => () => { abortAllStreams(); }, []);
 
   const selectTarget = async (id: string) => {
     // Cancel any in-flight generation before switching target
-    activeAbortRef.current?.abort();
-    activeAbortRef.current = null;
+    abortAllStreams();
     const [messages, sessions] = await Promise.all([
       api.getMessages(id),
       api.getSessions(id),
@@ -390,8 +412,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const sendHerMessage = (text: string) => {
-    if (!state.currentTargetId) return;
-    api.addMessage(state.currentTargetId, {
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
+    api.addMessage(targetId, {
       role: 'her',
       text,
       source: '手动输入',
@@ -399,29 +422,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SEND_HER_MESSAGE', message: msg });
 
       // 预请求：确保 session 已存在，这样 triggerAI 时可以跳过 createSession 等待
-      if (!state.currentSessionId && state.currentTargetId) {
-        api.createSession(state.currentTargetId).then(session => {
-          api.getSessions(state.currentTargetId!).then(sessions => {
+      if (!stateRef.current.currentSessionId && stateRef.current.currentTargetId) {
+        api.createSession(stateRef.current.currentTargetId!).then(session => {
+          api.getSessions(stateRef.current.currentTargetId!).then(sessions => {
             dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: session.id });
           });
         }).catch(() => {});
       }
+    }).catch(err => {
+      dispatch({ type: 'SET_ERROR', error: '消息发送失败: ' + (err.message || '网络错误') });
     });
   };
 
   const triggerAI = async () => {
-    if (!state.currentTargetId) return;
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
     // Cancel any previous in-flight request
-    activeAbortRef.current?.abort();
+    abortAllStreams();
 
     const mode = aiMode === 'quick' ? 'quick' : 'full';
 
     // Ensure session exists BEFORE dispatching TRIGGER_AI (UPDATE_SESSIONS resets phase)
-    let sessionId = state.currentSessionId;
+    let sessionId = stateRef.current.currentSessionId;
     if (!sessionId) {
       try {
-        const session = await api.createSession(state.currentTargetId);
-        const sessions = await api.getSessions(state.currentTargetId);
+        const session = await api.createSession(targetId);
+        const sessions = await api.getSessions(targetId);
         dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: session.id });
         sessionId = session.id;
       } catch (err: any) {
@@ -431,7 +457,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     dispatch({ type: 'TRIGGER_AI', mode });
-    const lastHerMsg = [...state.messages].reverse().find(m => m.role === 'her');
+    const lastHerMsg = [...stateRef.current.messages].reverse().find(m => m.role === 'her');
 
     // 2s timeout: transition from 'analyze' to 'generating' if no delta yet
     const analyzeTimer = setTimeout(() => {
@@ -488,8 +514,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
             loadSessionAiMessages(sessionId, dispatch);
             // Refresh sessions to update context_tokens in SessionBar
-            if (state.currentTargetId) {
-              api.getSessions(state.currentTargetId).then(sessions => {
+            if (stateRef.current.currentTargetId) {
+              api.getSessions(stateRef.current.currentTargetId).then(sessions => {
                 dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: sessionId });
               });
             }
@@ -514,16 +540,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const triggerAnalysis = async (mode: 'advisor' | 'review') => {
-    if (!state.currentTargetId) return;
-    activeAbortRef.current?.abort();
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
+    abortAllStreams();
 
     // Ensure session exists BEFORE dispatching TRIGGER_ANALYSIS (UPDATE_SESSIONS resets state)
-    let sessionId = state.currentSessionId;
+    let sessionId = stateRef.current.currentSessionId;
     if (!sessionId) {
       try {
-        const session = await api.createSession(state.currentTargetId);
+        const session = await api.createSession(targetId);
         sessionId = session.id;
-        dispatch({ type: 'UPDATE_SESSIONS', sessions: await api.getSessions(state.currentTargetId), currentSessionId: sessionId });
+        dispatch({ type: 'UPDATE_SESSIONS', sessions: await api.getSessions(targetId), currentSessionId: sessionId });
       } catch { return; }
     }
     dispatch({ type: 'TRIGGER_ANALYSIS', analysisMode: mode });
@@ -539,9 +566,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'ANALYSIS_SUCCESS', analysisMode: mode, data: evt.data.result });
           dispatch({ type: 'ANALYSIS_STEP', step: 'done' });
           // Refresh history after successful analysis
-          if (state.currentTargetId) {
-            api.getAnalyses(state.currentTargetId).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
+          if (stateRef.current.currentTargetId) {
+            api.getAnalyses(stateRef.current.currentTargetId).then(h => dispatch({ type: 'SET_ANALYSIS_HISTORY', history: h })).catch(() => {});
           }
+        } else if (evt.event === 'error') {
+          // Handle SSE error events to prevent frontend stuck in loading
+          dispatch({ type: 'ANALYSIS_FAILURE', error: evt.data.message || '分析服务异常' });
         }
       },
       (err) => {
@@ -554,13 +584,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const diagnoseTarget = async () => {
-    if (!state.currentTargetId) return;
-    activeAbortRef.current?.abort();
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
+    abortAllStreams();
 
     dispatch({ type: 'TRIGGER_DIAGNOSE' });
 
     const ctrl = api.diagnoseStream(
-      state.currentTargetId,
+      targetId,
       selectedProvider,
       (evt) => {
         if (evt.event === 'step') {
@@ -570,9 +601,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else if (evt.event === 'diagnosis_done') {
           dispatch({ type: 'DIAGNOSIS_SUCCESS', diagnosis: evt.data.diagnosis });
           // Refresh diagnosis history
-          if (state.currentTargetId) {
-            api.getDiagnoses(state.currentTargetId).then(h => dispatch({ type: 'SET_DIAGNOSIS_HISTORY', history: h })).catch(() => {});
+          if (stateRef.current.currentTargetId) {
+            api.getDiagnoses(stateRef.current.currentTargetId).then(h => dispatch({ type: 'SET_DIAGNOSIS_HISTORY', history: h })).catch(() => {});
           }
+        } else if (evt.event === 'error') {
+          dispatch({ type: 'DIAGNOSIS_FAILURE', error: evt.data.message || '诊断服务异常' });
         }
       },
       (err) => {
@@ -585,64 +618,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const clearDiagnosis = async () => {
-    if (!state.currentTargetId) return;
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
     try {
-      await api.clearActiveDiagnosis(state.currentTargetId);
+      await api.clearActiveDiagnosis(targetId);
       dispatch({ type: 'CLEAR_DIAGNOSIS' });
     } catch {}
   };
 
   const selectReplyAction = async (reply: { id: number; text: string; strategy: string }, aiMessageId?: string) => {
-    if (!state.currentSessionId || !state.currentTargetId) return;
+    const s = stateRef.current;
+    if (!s.currentSessionId || !s.currentTargetId) {
+      dispatch({ type: 'SET_ERROR', error: '请先创建辅导窗口' });
+      return;
+    }
     try {
-      const result = await api.selectReply(state.currentSessionId, reply.id, aiMessageId);
+      const result = await api.selectReply(s.currentSessionId, reply.id, aiMessageId);
       const msg: ChatMessage = {
-        id: result.messageId || '', target_id: state.currentTargetId, role: 'me',
+        id: result.messageId || '', target_id: s.currentTargetId, role: 'me',
         text: reply.text, source: 'AI建议', strategy: reply.strategy,
-        session_id: state.currentSessionId, created_at: Date.now(),
+        session_id: s.currentSessionId, created_at: Date.now(),
       };
       dispatch({ type: 'SELECT_REPLY', message: msg });
-      // Refresh aiMessages and selections
-      await loadSessionAiMessages(state.currentSessionId, dispatch);
+      await loadSessionAiMessages(s.currentSessionId, dispatch);
     } catch (err: any) {
       dispatch({ type: 'SET_ERROR', error: err.message });
     }
   };
 
   const sendCustomReply = async (text: string) => {
-    if (!state.currentSessionId || !state.currentTargetId) return;
+    const s = stateRef.current;
+    if (!s.currentSessionId || !s.currentTargetId) {
+      dispatch({ type: 'SET_ERROR', error: '请先创建辅导窗口' });
+      return;
+    }
     try {
-      const result = await api.customReply(state.currentSessionId, text);
+      const result = await api.customReply(s.currentSessionId, text);
       const msg: ChatMessage = {
-        id: (result as any).messageId || '', target_id: state.currentTargetId, role: 'me',
+        id: (result as any).messageId || '', target_id: s.currentTargetId, role: 'me',
         text, source: '自定义回复', strategy: null,
-        session_id: state.currentSessionId, created_at: Date.now(),
+        session_id: s.currentSessionId, created_at: Date.now(),
       };
       dispatch({ type: 'CUSTOM_REPLY', message: msg });
-      await loadSessionAiMessages(state.currentSessionId, dispatch);
+      await loadSessionAiMessages(s.currentSessionId, dispatch);
     } catch (err: any) {
       dispatch({ type: 'SET_ERROR', error: err.message });
     }
   };
 
   const createNewSession = async () => {
-    if (!state.currentTargetId) return;
-    const session = await api.createSession(state.currentTargetId);
-    const sessions = await api.getSessions(state.currentTargetId);
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
+    const session = await api.createSession(targetId);
+    const sessions = await api.getSessions(targetId);
     dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: session.id });
     dispatch({ type: 'SET_AI_MESSAGES', aiMessages: [] });
   };
 
   const switchSession = async (sessionId: string) => {
-    activeAbortRef.current?.abort();
-    dispatch({ type: 'UPDATE_SESSIONS', sessions: state.sessions, currentSessionId: sessionId });
+    abortAllStreams();
+    dispatch({ type: 'UPDATE_SESSIONS', sessions: stateRef.current.sessions, currentSessionId: sessionId });
     await loadSessionAiMessages(sessionId, dispatch);
   };
 
   const deleteSession = async (sessionId: string) => {
-    if (!state.currentTargetId) return;
+    const targetId = stateRef.current.currentTargetId;
+    if (!targetId) return;
+    abortAllStreams();
     await api.deleteSession(sessionId);
-    const sessions = await api.getSessions(state.currentTargetId);
+    const sessions = await api.getSessions(targetId);
     const activeSession = sessions.find(s => s.is_active === 1);
     dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: activeSession?.id || null });
     if (activeSession) {
@@ -658,6 +702,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
       models, selectedProvider, setSelectedProvider,
       aiMode, setAiMode, triggerAnalysis, diagnoseTarget, clearDiagnosis,
+      regenAbortRef, abortAllStreams,
     }}>
       {children}
     </AppContext.Provider>

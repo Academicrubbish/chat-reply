@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Input, Button } from 'antd';
 import { SendOutlined } from '@ant-design/icons';
 
@@ -12,12 +12,16 @@ interface MessageInputProps {
 
 const MessageInput: React.FC<MessageInputProps> = ({ onSend, disabled, placeholder }) => {
   const [text, setText] = useState('');
+  const sendingRef = useRef(false);
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || disabled || sendingRef.current) return;
+    sendingRef.current = true;
     onSend(trimmed);
     setText('');
+    // Prevent rapid re-trigger for 300ms
+    setTimeout(() => { sendingRef.current = false; }, 300);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

@@ -210,6 +210,7 @@ export interface AppState {
   isDiagnosing: boolean;
   diagnosisStep: 'idle' | 'analyzing' | 'generating' | 'parsing' | 'done';
   diagnosisHistory: TargetDiagnosis[];
+  errorTimestamp: number | null;
 }
 
 export type AppAction =
