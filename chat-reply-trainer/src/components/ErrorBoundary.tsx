@@ -1,4 +1,5 @@
 import React from 'react';
+import { WarningOutlined } from '@ant-design/icons';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -36,7 +37,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
       }
       return (
         <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+          <div style={{ fontSize: 32, marginBottom: 8, color: '#fa8c16' }}><WarningOutlined /></div>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>页面出了点问题</div>
           <button
             onClick={this.handleRetry}

@@ -83,17 +83,21 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
             </div>
             {(onEdit || onDelete) && (
               <div
-                className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-70 transition-opacity"
                 style={{ display: 'flex', gap: 2, zIndex: 10 }}
               >
                 {onEdit && (
                   <Button type="text" size="small" icon={<EditOutlined />}
+                    aria-label="编辑消息"
+                    aria-label="编辑场景"
                     style={{ fontSize: 10, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.12)', borderRadius: 4 }}
                     onClick={startEdit} />
                 )}
                 {onDelete && (
                   <Popconfirm title="确定删除这条场景？" onConfirm={() => onDelete(message.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
                     <Button type="text" size="small" icon={<DeleteOutlined />}
+                      aria-label="删除消息"
+                      aria-label="删除场景"
                       style={{ fontSize: 10, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.12)', borderRadius: 4, color: '#ff4d4f' }} />
                   </Popconfirm>
                 )}
@@ -130,15 +134,17 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
               {message.text}
             </div>
             {(onEdit || onDelete) && (
-              <div className="absolute -top-2 opacity-0 group-hover:opacity-100 transition-opacity" style={{ [isHer ? 'right' : 'left']: 0, display: 'flex', gap: 2, zIndex: 10 }}>
+              <div className="absolute -top-2 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-70 transition-opacity" style={{ [isHer ? 'right' : 'left']: 0, display: 'flex', gap: 2, zIndex: 10 }}>
                 {onEdit && (
                   <Button type="text" size="small" icon={<EditOutlined />}
+                    aria-label="编辑消息"
                     style={{ fontSize: 10, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.12)', borderRadius: 4 }}
                     onClick={startEdit} />
                 )}
                 {onDelete && (
                   <Popconfirm title="确定删除这条消息？" onConfirm={() => onDelete(message.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
                     <Button type="text" size="small" icon={<DeleteOutlined />}
+                      aria-label="删除消息"
                       style={{ fontSize: 10, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.12)', borderRadius: 4, color: '#ff4d4f' }} />
                   </Popconfirm>
                 )}
@@ -146,7 +152,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
             )}
           </>
         )}
-        <div className={`text-[9px] text-[#bbb] mt-0.5 ${isHer ? 'text-left' : 'text-right'}`}>
+        <div className={`text-[11px] text-[#bbb] mt-0.5 ${isHer ? 'text-left' : 'text-right'}`}>
           {renderSource()}
         </div>
       </div>

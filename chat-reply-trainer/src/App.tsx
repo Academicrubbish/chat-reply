@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, message } from 'antd';
-import { LogoutOutlined } from '@ant-design/icons';
+import { Button, message, Segmented, Skeleton } from 'antd';
+import { LogoutOutlined, CrownOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import * as api from './services/api';
 import { parseChatWithMeta } from './utils/parseChat';
@@ -11,6 +11,7 @@ import SetupPage from './components/SetupPage';
 import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import OnboardingPage from './components/OnboardingPage';
+import AdminPage from './components/AdminPage';
 import TargetSelector from './components/TargetSelector';
 import TargetModal from './components/TargetModal';
 import Toolbar from './components/Toolbar';
@@ -22,18 +23,27 @@ import { AnalysisSteps, AnalysisModal, ReviewModal } from './components/Analysis
 import { Card } from 'antd';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis, diagnoseTarget } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis, diagnoseTarget, regenAbortRef, abortAllStreams } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
-  const regenAbortRef = useRef<AbortController | null>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Check admin status on mount
+  useEffect(() => {
+    api.checkAdmin().then(r => setIsAdmin(r.isAdmin)).catch(() => {});
+  }, []);
 
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const mql = window.matchMedia('(max-width: 767px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
   }, []);
 
   // Auto-start guided tour only for newly registered users
@@ -60,13 +70,19 @@ function AppContent() {
     if (state.error) {
       messageApi.error(state.error);
     }
-  }, [state.error, messageApi]);
+  }, [state.errorTimestamp, messageApi]);
+
+  // Admin page guard
+  if (showAdmin && isAdmin) {
+    return <AdminPage onBack={() => setShowAdmin(false)} isMobile={isMobile} />;
+  }
 
   const handleSaveTarget = async (data: any) => {
     if (state.editingTarget) {
       const updated = await api.updateTarget(state.editingTarget.id, data);
       dispatch({ type: 'UPDATE_TARGET', target: updated });
-      if (state.currentTargetId === updated.id) {
+      // 只在非生成状态下刷新完整目标数据，避免中断正在进行的 AI 生成
+      if (state.currentTargetId === updated.id && state.phase !== 'generating') {
         selectTarget(updated.id);
       }
     } else {
@@ -117,11 +133,12 @@ function AppContent() {
   };
 
   const handleRegenerate = async () => {
-    if (!state.currentSessionId || state.phase === 'generating') return;
+    const s = stateRef.current;
+    if (!s.currentSessionId || s.phase === 'generating') return;
     dispatch({ type: 'TRIGGER_REGENERATE' });
 
     // Get current round's roundId from replyVersions
-    const currentRoundId = state.replyVersions[state.activeVersionIndex]?.roundId;
+    const currentRoundId = s.replyVersions[s.activeVersionIndex]?.roundId;
     const mode = aiMode === 'quick' ? 'quick' : 'full';
 
     // 2s timeout: advance step if no delta yet
@@ -140,7 +157,7 @@ function AppContent() {
     resetHeartbeat();
 
     const ctrl = api.regenerateStream(
-      state.currentSessionId,
+      s.currentSessionId,
       {
         mode,
         provider: selectedProvider,
@@ -176,9 +193,9 @@ function AppContent() {
             if (heartbeatTimer) clearTimeout(heartbeatTimer);
             dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
             // Refresh session data
-            if (state.currentTargetId) {
-              api.getSessions(state.currentTargetId).then(sessions => {
-                dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: state.currentSessionId });
+            if (stateRef.current.currentTargetId) {
+              api.getSessions(stateRef.current.currentTargetId).then(sessions => {
+                dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: stateRef.current.currentSessionId });
               });
             }
             break;
@@ -203,8 +220,7 @@ function AppContent() {
   };
 
   const handleCancelGeneration = () => {
-    regenAbortRef.current?.abort();
-    regenAbortRef.current = null;
+    abortAllStreams();
     dispatch({ type: 'CANCEL_GENERATION' });
   };
 
@@ -243,7 +259,7 @@ function AppContent() {
     return (
       <>
         <div className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 shrink-0">
-          <div className="w-9 h-9 bg-linear-to-br from-[#667eea] to-[#764ba2] rounded-lg flex items-center justify-center text-white font-bold text-base">AI</div>
+          <div className="w-9 h-9 bg-linear-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center text-white"><ThunderboltOutlined /></div>
           <div className="flex flex-col">
             <h1>聊天模拟器</h1>
             <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
@@ -266,7 +282,7 @@ function AppContent() {
 
       {/* Top Bar */}
       <div className="h-14 bg-white border-b border-border flex items-center shrink-0" style={{ padding: isMobile ? '0 12px' : '0 24px', gap: isMobile ? 8 : 16 }}>
-        <div className="w-9 h-9 bg-linear-to-br from-[#667eea] to-[#764ba2] rounded-lg flex items-center justify-center text-white font-bold text-base">AI</div>
+        <div className="w-9 h-9 bg-linear-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center text-white"><ThunderboltOutlined /></div>
         <div className="flex flex-col">
           <h1>聊天模拟器</h1>
           {!isMobile && <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>}
@@ -279,6 +295,16 @@ function AppContent() {
           onCreateNew={() => dispatch({ type: 'OPEN_MODAL' })}
           onDelete={handleDeleteTarget}
         />
+        {isAdmin && (
+          <Button
+            size="small"
+            icon={<CrownOutlined />}
+            onClick={() => setShowAdmin(true)}
+            style={{ color: '#fa8c16', borderColor: '#ffd591' }}
+          >
+            {isMobile ? '' : '管理'}
+          </Button>
+        )}
         <Button
           size="small"
           icon={<LogoutOutlined />}
@@ -290,17 +316,16 @@ function AppContent() {
 
       {/* Mobile Tab Bar */}
       {isMobile && (
-        <div data-tour-id="mobile-tab-bar" style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
-          <button onClick={() => setMobileTab('chat')} style={{
-            flex: 1, padding: '8px 0', border: 'none', background: mobileTab === 'chat' ? '#e8f0fe' : '#fff',
-            color: mobileTab === 'chat' ? '#3b5998' : '#666', fontWeight: mobileTab === 'chat' ? 600 : 400,
-            fontSize: 13, cursor: 'pointer', borderBottom: mobileTab === 'chat' ? '2px solid #3b5998' : '2px solid transparent',
-          }}>聊天</button>
-          <button onClick={() => setMobileTab('ai')} style={{
-            flex: 1, padding: '8px 0', border: 'none', background: mobileTab === 'ai' ? '#e8f0fe' : '#fff',
-            color: mobileTab === 'ai' ? '#3b5998' : '#666', fontWeight: mobileTab === 'ai' ? 600 : 400,
-            fontSize: 13, cursor: 'pointer', borderBottom: mobileTab === 'ai' ? '2px solid #3b5998' : '2px solid transparent',
-          }}>AI 辅助</button>
+        <div data-tour-id="mobile-tab-bar" style={{ padding: '6px 16px', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
+          <Segmented
+            block
+            value={mobileTab}
+            onChange={(val) => setMobileTab(val as 'chat' | 'ai')}
+            options={[
+              { label: '聊天', value: 'chat' },
+              { label: 'AI 辅助', value: 'ai' },
+            ]}
+          />
         </div>
       )}
 
@@ -500,7 +525,13 @@ function App() {
   }, []);
 
   if (authState === 'loading') {
-    return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>加载中...</div>;
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', gap: 16, padding: '40px 24px', maxWidth: 480, margin: '0 auto' }}>
+        <Skeleton active paragraph={{ rows: 1 }} title={{ width: '40%' }} />
+        <Skeleton active paragraph={{ rows: 6 }} />
+        <Skeleton.Button active block style={{ height: 48 }} />
+      </div>
+    );
   }
 
   if (authState === 'setup') {

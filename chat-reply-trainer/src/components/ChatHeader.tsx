@@ -41,7 +41,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ targetName, onReset, aiMode, on
           cancelText="取消"
           okButtonProps={{ danger: true }}
         >
-          <Button size="small" type="text" icon={<ReloadOutlined />} style={{ color: '#999' }} />
+          <Button size="small" type="text" icon={<ReloadOutlined />} aria-label="重置聊天记录" style={{ color: '#999' }} />
         </Popconfirm>
       </div>
     </div>

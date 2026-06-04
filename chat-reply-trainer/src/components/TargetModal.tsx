@@ -308,7 +308,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
                           padding: '3px 10px', fontSize: 12, lineHeight: 1.5, color: '#8c6d1f',
                           wordBreak: 'break-all', whiteSpace: 'pre-wrap', textAlign: 'center',
                         }}>
-                          📋 {msg.text}
+                          {msg.text}
                         </div>
                       ) : (
                         <div style={{ display: 'flex', justifyContent: msg.role === 'her' ? 'flex-start' : 'flex-end' }}>

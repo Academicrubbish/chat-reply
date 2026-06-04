@@ -234,6 +234,7 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
               icon={feedback === 'thumbs_up' ? <LikeFilled /> : <LikeOutlined />}
               style={feedback === 'thumbs_up' ? { color: '#1890ff' } : undefined}
               disabled={feedback === 'thumbs_down'}
+              aria-label="点赞"
               onClick={e => { e.stopPropagation(); handleFeedback('thumbs_up'); }} />
           </Tooltip>
           <Tooltip title={feedback ? '已反馈' : '踩：AI 会减少这类风格'}>
@@ -241,6 +242,7 @@ function FeedbackReplyCard({ reply, onSelectReply, onFeedback }: {
               icon={feedback === 'thumbs_down' ? <DislikeFilled /> : <DislikeOutlined />}
               style={feedback === 'thumbs_down' ? { color: '#ff4d4f' } : undefined}
               disabled={feedback === 'thumbs_up'}
+              aria-label="踩"
               onClick={e => { e.stopPropagation(); handleFeedback('thumbs_down'); }} />
           </Tooltip>
         </Space>

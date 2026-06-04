@@ -22,6 +22,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   onAddScene, onImportMessages,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [insertMode, setInsertMode] = useState<InsertMode>('none');
   const [sceneText, setSceneText] = useState('');
   const [importText, setImportText] = useState('');
@@ -39,7 +40,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const [meNickname, setMeNickname] = useState<string>('');
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = containerRef.current;
+    if (container) {
+      const threshold = 150;
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+      if (isNearBottom) {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   const resetImportState = () => {
@@ -122,7 +132,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const showNicknamePicker = wechatNicknames.length >= 2 && parsedPreview.length === 0;
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5">
+    <div ref={containerRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5">
       {messages.length === 0 && (
         <Empty description="开始新对话" style={{ marginTop: 40 }} />
       )}
@@ -271,7 +281,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
               {parsedPreview.map((m, i) => (
                 <React.Fragment key={i}>
                   <div style={{ color: m.role === 'scene' ? '#8c6d1f' : m.role === 'her' ? '#f48fb1' : '#66bb6a' }}>
-                    {m.role === 'scene' ? '📋' : m.role === 'her' ? '她' : '我'}：{m.text.slice(0, 50)}{m.text.length > 50 ? '...' : ''}
+                    {m.role === 'scene' ? '场景' : m.role === 'her' ? '她' : '我'}：{m.text.slice(0, 50)}{m.text.length > 50 ? '...' : ''}
                   </div>
                   {/* Insert scene between messages */}
                   {insertSceneIndex === i + 1 ? (

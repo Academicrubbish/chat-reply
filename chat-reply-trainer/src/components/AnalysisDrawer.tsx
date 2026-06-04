@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { Drawer, Card, Tag, Collapse, Empty, Divider, Tooltip, Modal, Tabs, Button, Descriptions, Spin } from 'antd';
-import { LikeOutlined, WarningOutlined, BulbOutlined, AimOutlined, HeartOutlined, SmileOutlined, CheckCircleFilled, LoadingOutlined, HistoryOutlined, SafetyCertificateOutlined, RadarChartOutlined, BarChartOutlined } from '@ant-design/icons';
+import { LikeOutlined, WarningOutlined, BulbOutlined, AimOutlined, HeartOutlined, HeartFilled, SmileOutlined, CheckCircleFilled, LoadingOutlined, HistoryOutlined, SafetyCertificateOutlined, RadarChartOutlined, BarChartOutlined, CheckOutlined, CloseOutlined, InfoCircleOutlined, MessageOutlined, EyeOutlined, PaperClipOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import type { AdvisorAnalysis, ReviewAnalysis, ReviewScores, AnalysisRecord, TargetDiagnosis } from '../types';
 import { getKnowledgeUnit } from '../services/api';
 
@@ -82,7 +82,10 @@ function RadarChart({ scores }: { scores: ReviewScores }) {
 
   return (
     <div style={{ textAlign: 'center' }}>
-      <svg width={200} height={200} viewBox="0 0 200 200">
+      <svg width={200} height={200} viewBox="0 0 200 200"
+        role="img"
+        aria-label={`五维雷达图: 信号识别${scores.signalRecognition}, 策略选择${scores.strategySelection}, 节奏控制${scores.rhythmControl}, 情绪管理${scores.emotionManagement}, 回应质量${scores.responseQuality}`}
+      >
         {/* Grid rings */}
         {[1, 2, 3, 4, 5].map(level => (
           <polygon key={level} points={polygon(R * level / 5)} fill="none" stroke="#e8e8e8" strokeWidth={0.5} />
@@ -164,19 +167,19 @@ function KnowledgeTag({ id }: { id: string }) {
             {typeInfo && <Tag color={typeInfo.color} style={{ marginBottom: 12 }}>{typeInfo.label}</Tag>}
             {detail.reading && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>📖 原文引用</div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}><InfoCircleOutlined style={{ marginRight: 4 }} />原文引用</div>
                 <div style={{ fontSize: 13, lineHeight: 1.6, background: '#f6f8fa', padding: '8px 12px', borderRadius: 6 }}>{detail.reading}</div>
               </div>
             )}
             {detail.interpretation && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>🧠 方法论</div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}><BulbOutlined style={{ marginRight: 4 }} />方法论</div>
                 <div style={{ fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{detail.interpretation}</div>
               </div>
             )}
             {detail.execution?.length > 0 && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>🎯 操作步骤</div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}><AimOutlined style={{ marginRight: 4 }} />操作步骤</div>
                 <ol style={{ paddingLeft: 20, margin: 0 }}>
                   {detail.execution.map((s: any, i: number) => (
                     <li key={i} style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 4 }}>
@@ -189,7 +192,7 @@ function KnowledgeTag({ id }: { id: string }) {
             )}
             {detail.boundary?.length > 0 && (
               <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>⚠️ 边界条件</div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}><WarningOutlined style={{ marginRight: 4 }} />边界条件</div>
                 <div style={{ fontSize: 13, lineHeight: 1.6, color: '#666' }}>{detail.boundary.join('；')}</div>
               </div>
             )}
@@ -205,9 +208,9 @@ function KnowledgeTag({ id }: { id: string }) {
 // ===== 警告徽章 =====
 function WarningBadge({ level }: { level: 'green' | 'yellow' | 'red' }) {
   const config = {
-    green: { color: '#52c41a', bg: '#f6ffed', border: '#b7eb8f', icon: '✅', text: '状态健康' },
-    yellow: { color: '#fa8c16', bg: '#fff7e6', border: '#ffd591', icon: '⚠️', text: '需要调整' },
-    red: { color: '#f5222d', bg: '#fff1f0', border: '#ffa39e', icon: '🚨', text: '存在风险' },
+    green: { color: '#52c41a', bg: '#f6ffed', border: '#b7eb8f', icon: <CheckOutlined style={{ fontSize: 12 }} />, text: '状态健康' },
+    yellow: { color: '#fa8c16', bg: '#fff7e6', border: '#ffd591', icon: <WarningOutlined style={{ fontSize: 12 }} />, text: '需要调整' },
+    red: { color: '#f5222d', bg: '#fff1f0', border: '#ffa39e', icon: <CloseOutlined style={{ fontSize: 12 }} />, text: '存在风险' },
   }[level];
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 10px', borderRadius: 12, background: config.bg, border: `1px solid ${config.border}`, fontSize: 12, color: config.color, fontWeight: 600 }}>
@@ -217,11 +220,11 @@ function WarningBadge({ level }: { level: 'green' | 'yellow' | 'red' }) {
 }
 
 // ===== 好感级别指示 =====
-const ATTITUDE_LEVELS: Record<string, { emoji: string; color: string; label: string }> = {
-  '回应': { emoji: '👋', color: '#1677ff', label: '基础回应' },
-  '倾诉': { emoji: '💬', color: '#722ed1', label: '主动倾诉' },
-  '关注': { emoji: '👀', color: '#fa8c16', label: '特别关注' },
-  '依顺': { emoji: '❤️', color: '#eb2f96', label: '好感依顺' },
+const ATTITUDE_LEVELS: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
+  '回应': { icon: <MessageOutlined style={{ fontSize: 12 }} />, color: '#1677ff', label: '基础回应' },
+  '倾诉': { icon: <HeartOutlined style={{ fontSize: 12 }} />, color: '#722ed1', label: '主动倾诉' },
+  '关注': { icon: <EyeOutlined style={{ fontSize: 12 }} />, color: '#fa8c16', label: '特别关注' },
+  '依顺': { icon: <HeartFilled style={{ fontSize: 12 }} />, color: '#eb2f96', label: '好感依顺' },
 };
 
 // ===== Advisor View =====
@@ -232,7 +235,7 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
   const nextStep = data.nextStep || { action: '', strategy: '', keyPoints: [], warnings: [] };
   const diagnosis = data.diagnosis;
 
-  const levelInfo = ATTITUDE_LEVELS[attitude.level || ''] || { emoji: '🔍', color: '#999', label: attitude.status || '未知' };
+  const levelInfo = ATTITUDE_LEVELS[attitude.level || ''] || { icon: <InfoCircleOutlined style={{ fontSize: 12 }} />, color: '#999', label: attitude.status || '未知' };
 
   const sections = [
     {
@@ -243,7 +246,7 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
             {attitude.level && (
               <Tag color={levelInfo.color} style={{ fontWeight: 600 }}>
-                {levelInfo.emoji} {attitude.level}
+                {levelInfo.icon} {attitude.level}
               </Tag>
             )}
             {!attitude.level && (
@@ -252,13 +255,13 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
               </Tag>
             )}
             {attitude.languagePattern && (
-              <Tag color="cyan" style={{ fontSize: 11 }}>🗣 {attitude.languagePattern}</Tag>
+              <Tag color="cyan" style={{ fontSize: 11 }}><MessageOutlined style={{ marginRight: 4, fontSize: 10 }} />{attitude.languagePattern}</Tag>
             )}
           </div>
           <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>{attitude.detail}</div>
           {attitude.evidence && (
             <div style={{ fontSize: 12, color: '#888', background: '#f6f8fa', padding: '6px 10px', borderRadius: 6 }}>
-              📎 {attitude.evidence}
+              <PaperClipOutlined style={{ marginRight: 4 }} />{attitude.evidence}
             </div>
           )}
         </div>
@@ -280,7 +283,7 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
           <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>{emotion.detail}</div>
           {emotion.evidence && (
             <div style={{ fontSize: 12, color: '#888', background: '#f6f8fa', padding: '6px 10px', borderRadius: 6 }}>
-              📎 {emotion.evidence}
+              <PaperClipOutlined style={{ marginRight: 4 }} /> {emotion.evidence}
             </div>
           )}
         </div>
@@ -310,9 +313,9 @@ function AdvisorView({ data }: { data: AdvisorAnalysis }) {
     children: (
       <div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-          {diagnosis.stage && <Tag color="blue">📍 {diagnosis.stage}</Tag>}
+          {diagnosis.stage && <Tag color="blue"><EnvironmentOutlined style={{ marginRight: 4, fontSize: 10 }} />{diagnosis.stage}</Tag>}
           <Tag color={diagnosis.upgradeReady ? 'green' : 'default'}>
-            {diagnosis.upgradeReady ? '✅ 可升级' : '🔒 暂不宜升级'}
+            {diagnosis.upgradeReady ? '可升级' : '暂不宜升级'}
           </Tag>
         </div>
         {diagnosis.upgradeReason && (
@@ -411,13 +414,13 @@ function ReviewView({ data }: { data: ReviewAnalysis }) {
       {/* Strengths & Weaknesses */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 120 }}>
-          <div style={{ fontSize: 12, color: '#52c41a', fontWeight: 600, marginBottom: 4 }}>✅ 优势</div>
+          <div style={{ fontSize: 12, color: '#52c41a', fontWeight: 600, marginBottom: 4 }}>优势</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {overall.strengths?.map((s, i) => <Tag key={i} color="success">{s}</Tag>)}
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 120 }}>
-          <div style={{ fontSize: 12, color: '#fa8c16', fontWeight: 600, marginBottom: 4 }}>⚠️ 待提升</div>
+          <div style={{ fontSize: 12, color: '#fa8c16', fontWeight: 600, marginBottom: 4 }}>待提升</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {overall.weaknesses?.map((w, i) => <Tag key={i} color="warning">{w}</Tag>)}
           </div>
@@ -449,7 +452,7 @@ function ReviewView({ data }: { data: ReviewAnalysis }) {
               <div style={{ fontSize: 12, color: '#999', marginBottom: 2 }}>Round {h.round}</div>
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>{h.action}</div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 2 }}>{h.whyGood || h.why}</div>
-              {h.tip && <div style={{ fontSize: 12, color: '#52c41a' }}>💡 {h.tip}</div>}
+              {h.tip && <div style={{ fontSize: 12, color: '#52c41a' }}><BulbOutlined style={{ marginRight: 4 }} />{h.tip}</div>}
             </Card>
           ))}
         </div>
@@ -466,7 +469,7 @@ function ReviewView({ data }: { data: ReviewAnalysis }) {
               <div style={{ fontSize: 12, color: '#999', marginBottom: 2 }}>Round {m.round}</div>
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>{m.action}</div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 2 }}>{m.whyBad || m.why}</div>
-              {m.better && <div style={{ fontSize: 12, color: '#1677ff' }}>✨ 更好的做法：{m.better}</div>}
+              {m.better && <div style={{ fontSize: 12, color: '#1677ff' }}>更好的做法：{m.better}</div>}
             </Card>
           ))}
         </div>
@@ -513,7 +516,7 @@ function HistoryList({ history, onSelect }: { history: AnalysisRecord[]; onSelec
             onMouseEnter={e => { e.currentTarget.style.borderColor = '#3b5998'; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = '#eee'; }}
           >
-            <span style={{ fontSize: 14 }}>{record.msg_type === 'advisor' ? '🎯' : '📊'}</span>
+            <span style={{ fontSize: 14 }}>{record.msg_type === 'advisor' ? <AimOutlined /> : <BarChartOutlined />}</span>
             <span style={{ fontSize: 12, fontWeight: 500, color: '#333' }}>
               {record.msg_type === 'advisor' ? '军师分析' : '复盘总结'}
             </span>
@@ -541,10 +544,10 @@ const AnalysisDrawer: React.FC<AnalysisDrawerProps> = ({
   history, onSelectHistory,
 }) => {
   const title = analysisMode === 'advisor'
-    ? `🎯 军师分析 — ${targetName}`
+    ? `军师分析 — ${targetName}`
     : analysisMode === 'review'
-      ? `📊 复盘总结 — ${targetName}`
-      : `📋 历史记录 — ${targetName}`;
+      ? `复盘总结 — ${targetName}`
+      : `历史记录 — ${targetName}`;
 
   return (
     <Drawer
@@ -672,7 +675,7 @@ function DiagnosisTab({
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '6px 8px', borderRadius: 6, background: '#fafafa', border: '1px solid #eee', fontSize: 12,
                 }}>
-                  <span>🎯</span>
+                  <AimOutlined />
                   <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{record.stage}</Tag>
                   <span style={{ color: '#666', flex: 1 }}>{record.strategy}</span>
                   <span style={{ color: '#999', fontSize: 11 }}>{timeStr}</span>
@@ -825,7 +828,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
   return (
     <Modal
-      title={`📊 ${targetName} 的复盘总结`}
+      title={`${targetName} 的复盘总结`}
       open={open}
       onCancel={onClose}
       footer={null}

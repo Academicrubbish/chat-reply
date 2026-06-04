@@ -129,7 +129,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
                           style={{ ...mobileTagStyle, cursor: 'pointer' }}
                           onClick={onOpenAnalysisModal}
                         >
-                          🎯 {activeDiagnosis.stage} · {activeDiagnosis.strategy}
+                          {activeDiagnosis.stage} · {activeDiagnosis.strategy}
                         </Tag>
                       ) : (
                         <span style={{ fontSize: 10, color: '#888', lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
