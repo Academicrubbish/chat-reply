@@ -40,14 +40,28 @@ export function getAvailableModels(): { provider: string; label: string; model: 
     .map(m => ({ provider: m.provider, label: m.label, model: process.env[m.modelEnv] || '' }));
 }
 
-export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 16384): Promise<string> {
-  const response = await getClient(provider).chat.completions.create({
-    model: getModel(provider),
-    messages: messages as any,
-    temperature: 0.8,
-    max_tokens: maxTokens,
-  });
-  return response.choices[0].message.content || '';
+export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 16384, maxRetries = 1): Promise<string> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await getClient(provider).chat.completions.create({
+        model: getModel(provider),
+        messages: messages as any,
+        temperature: 0.8,
+        max_tokens: maxTokens,
+      });
+      return response.choices[0].message.content || '';
+    } catch (err: any) {
+      lastError = err;
+      if (err.message?.includes('未配置') || err.message?.includes('未知的模型提供者')) {
+        throw err;
+      }
+      if (attempt < maxRetries) {
+        console.log(`[LLM] Non-stream attempt ${attempt + 1} failed, retrying...`, err.message);
+      }
+    }
+  }
+  throw lastError || new Error('LLM 非流式调用失败');
 }
 
 export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxRetries = 1, maxTokens = 16384): AsyncGenerator<string> {

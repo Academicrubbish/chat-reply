@@ -290,46 +290,59 @@ const SAFE_FALLBACK = {
 };
 
 function parseJsonSafely(text: string): any | null {
-  // 快速路径：直接解析（启用 response_format 后大多数情况走这里）
+  // 快速路径：直接解析
   try { return JSON.parse(text); } catch {}
 
-  // 预处理管道：一次性清洗所有常见问题
+  // ===== 路径 A：保守清洗（不替换中文引号，避免破坏字符串内的 ""）=====
+  // 关键：中文引号 "" 在 JSON 字符串值内部是合法 Unicode，不应替换
+  // 只在路径 B 才尝试替换中文引号（处理 LLM 用 "" 做 JSON 分隔符的情况）
   let cleaned = text
-    .replace(/```(?:json)?\s*/gi, '')   // 去掉 ```json 开头
-    .replace(/```\s*/g, '')              // 去掉 ``` 结尾
-    .replace(/[“”]/g, '"')     // 中文引号 → 英文引号
-    .replace(/[\x00-\x1f]/g, '')         // 去控制字符
-    .replace(/,\s*([}\]])/g, '$1');      // 去尾部逗号
+    .replace(/```(?:json)?\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .replace(/[\x00-\x1f]/g, '')   // 去控制字符（含 raw newline，JSON 不允许）
+    .replace(/,\s*([}\]])/g, '$1');
 
   try { return JSON.parse(cleaned); } catch {}
 
-  // 提取第一个 { 到最后一个 } 之间的内容
+  // 提取 JSON 块
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
   if (firstBrace === -1) return null;
+  let jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
 
-  let jsonStr = lastBrace > firstBrace
-    ? cleaned.slice(firstBrace, lastBrace + 1)
-    : cleaned.slice(firstBrace);
+  // 修复中文标点（, : ; 不破坏引号结构）
+  let fixed = jsonStr.replace(/，/g, ',').replace(/：/g, ':').replace(/；/g, ';');
+  try { return JSON.parse(fixed); } catch {}
 
-  try { return JSON.parse(jsonStr); } catch {}
+  // 截断修复
+  try { return tryRecoverTruncated(fixed); } catch {}
 
-  // 修复截断：补齐引号和括号
-  const quoteCount = (jsonStr.match(/"/g) || []).length;
-  if (quoteCount % 2 !== 0) jsonStr += '"';
-  const openBrackets = (jsonStr.match(/\[/g) || []).length - (jsonStr.match(/\]/g) || []).length;
-  const openBraces = (jsonStr.match(/\{/g) || []).length - (jsonStr.match(/\}/g) || []).length;
-  for (let i = 0; i < openBrackets; i++) jsonStr += ']';
-  for (let i = 0; i < openBraces; i++) jsonStr += '}';
-  jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+  // ===== 路径 B：激进清洗（替换中文引号 "" → ""，可能解决用中文引号做 JSON 分隔符的情况）=====
+  let aggressive = jsonStr.replace(/[“”]/g, '"');
+  try { return JSON.parse(aggressive); } catch {}
 
-  try {
-    const result = JSON.parse(jsonStr);
-    console.log('[LLM] Salvaged truncated JSON successfully');
-    return result;
-  } catch {}
+  // 中文标点 + 激进引号
+  let aggressiveFixed = aggressive.replace(/，/g, ',').replace(/：/g, ':').replace(/；/g, ';');
+  try { return JSON.parse(aggressiveFixed); } catch {}
+
+  // 截断修复
+  try { return tryRecoverTruncated(aggressiveFixed); } catch {}
 
   return null;
+}
+
+function tryRecoverTruncated(jsonStr: string): any {
+  let recovered = jsonStr;
+  const quoteCount = (recovered.match(/"/g) || []).length;
+  if (quoteCount % 2 !== 0) recovered += '"';
+  const ob = (recovered.match(/\[/g) || []).length - (recovered.match(/\]/g) || []).length;
+  const oc = (recovered.match(/\{/g) || []).length - (recovered.match(/\}/g) || []).length;
+  for (let i = 0; i < ob; i++) recovered += ']';
+  for (let i = 0; i < oc; i++) recovered += '}';
+  recovered = recovered.replace(/,\s*([}\]])/g, '$1');
+  const result = JSON.parse(recovered);
+  console.log('[LLM] Salvaged truncated JSON');
+  return result;
 }
 
 // ===== Compact Quick Mode Normalizer =====
@@ -430,14 +443,29 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       send('step', { step: 'auto_diagnosing' });
       try {
         diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
-        send('diagnosis_ready', { diagnosis });
-        // Send plan derived from diagnosis
-        if (diagnosis.action || diagnosis.strategy) {
-          send('plan', { goal: diagnosis.action, nextStep: diagnosis.strategy });
-        }
       } catch (diagErr: any) {
         console.error('[Auto-Diagnose Error]', diagErr.message);
-        // Diagnosis failed: still try to generate without diagnosis context
+        // Create fallback diagnosis so frontend always has something to show
+        diagnosis = {
+          id: '',
+          target_id: target.id,
+          attitude_level: '无法判断',
+          language_pattern: '无法判断',
+          emotion_type: '未知',
+          emotion_valence: '中性',
+          stage: '信息不足',
+          upgrade_ready: false,
+          upgrade_reason: '',
+          warnings: ['自动诊断暂时不可用，请稍后手动重新诊断'],
+          action: '维持当前关系',
+          strategy: '先进行轻松对话，积累更多数据后再诊断',
+          knowledgeIds: [],
+          created_at: Date.now(),
+        };
+      }
+      send('diagnosis_ready', { diagnosis });
+      if (diagnosis.action || diagnosis.strategy) {
+        send('plan', { goal: diagnosis.action, nextStep: diagnosis.strategy });
       }
     }
 
@@ -493,7 +521,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
-      console.error('[LLM Parse Error] All fallback attempts failed. Raw:', raw.slice(0, 500));
+      console.error('[LLM Parse Error] Full raw output:\n', raw);
+      // Send debug info to frontend so user can inspect in browser console
+      send('debug_raw', { source: 'generate', rawLength: raw.length, rawPreview: raw.slice(0, 800) });
       parsed = SAFE_FALLBACK;
       console.log('[LLM] Using safe fallback response');
     }
@@ -650,12 +680,28 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       send('step', { step: 'auto_diagnosing' });
       try {
         diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
-        send('diagnosis_ready', { diagnosis });
-        if (diagnosis.action || diagnosis.strategy) {
-          send('plan', { goal: diagnosis.action, nextStep: diagnosis.strategy });
-        }
       } catch (diagErr: any) {
         console.error('[Auto-Diagnose Error]', diagErr.message);
+        diagnosis = {
+          id: '',
+          target_id: target.id,
+          attitude_level: '无法判断',
+          language_pattern: '无法判断',
+          emotion_type: '未知',
+          emotion_valence: '中性',
+          stage: '信息不足',
+          upgrade_ready: false,
+          upgrade_reason: '',
+          warnings: ['自动诊断暂时不可用，请稍后手动重新诊断'],
+          action: '维持当前关系',
+          strategy: '先进行轻松对话，积累更多数据后再诊断',
+          knowledgeIds: [],
+          created_at: Date.now(),
+        };
+      }
+      send('diagnosis_ready', { diagnosis });
+      if (diagnosis.action || diagnosis.strategy) {
+        send('plan', { goal: diagnosis.action, nextStep: diagnosis.strategy });
       }
     }
 
@@ -785,8 +831,9 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     send('step', { step: 'parsing' });
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
-      console.error('[Diagnose Parse Error] Raw:', raw.slice(0, 500));
-      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试', rawLength: raw.length })}\n\n`);
+      console.error('[Diagnose Parse Error] Full raw output:\n', raw);
+      send('debug_raw', { source: 'diagnose', rawLength: raw.length, rawPreview: raw.slice(0, 800) });
+      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试', rawLength: raw.length, rawPreview: raw.slice(0, 500) })}\n\n`);
       res.end();
       return;
     }
@@ -921,7 +968,7 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
   const raw = await chatCompletion(messages, provider, 16384);
   let parsed = parseJsonSafely(raw);
   if (!parsed) {
-    console.error('[Auto-Diagnose Parse Error] Raw:', raw.slice(0, 500));
+    console.error('[Auto-Diagnose Parse Error] Full raw output:\n', raw);
     throw new Error('自动诊断解析失败');
   }
 
@@ -1049,10 +1096,25 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     send('step', { step: 'parsing' });
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
-      console.error('[Analyze Parse Error] Raw:', raw.slice(0, 500));
-      res.write(`event: error\ndata: ${JSON.stringify({ message: '分析结果解析失败，请重试', rawLength: raw.length })}\n\n`);
-      res.end();
-      return;
+      console.error('[Analyze Parse Error] Full raw output:\n', raw);
+      send('debug_raw', { source: mode, rawLength: raw.length, rawPreview: raw.slice(0, 800) });
+      // Create fallback response based on mode instead of erroring
+      if (mode === 'advisor') {
+        parsed = {
+          attitude: { level: '无法判断', languagePattern: '解析异常', detail: 'AI 返回格式异常，建议重试', evidence: '' },
+          emotion: { type: '未知', valence: '中性', detail: '无法识别', evidence: '' },
+          thought: { intention: '数据不足（低）', expectation: '无法判断', detail: '本次分析结果未能解析，请重新分析' },
+          diagnosis: { warnings: ['解析失败，请重试'], stage: '信息不足', upgradeReady: false, upgradeReason: '', knowledgeIds: [] },
+          nextStep: { action: '建议重新分析', strategy: '重试', keyPoints: [], warnings: ['请重试'] },
+        };
+      } else {
+        parsed = {
+          highlights: [],
+          mistakes: [],
+          scores: { signalRecognition: 3, strategySelection: 3, rhythmControl: 3, emotionManagement: 3, responseQuality: 3 },
+          overall: { total: 60, summary: 'AI 返回格式异常，分数为降级默认值，建议重新复盘', strengths: [], weaknesses: ['解析失败'], advice: '请重新点击复盘', warningLevel: 'yellow', knowledgeGaps: [] },
+        };
+      }
     }
 
     // Save to ai_messages

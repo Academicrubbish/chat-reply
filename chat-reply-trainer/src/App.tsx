@@ -34,6 +34,14 @@ function AppContent() {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // Auto-open diagnosis modal when a new diagnosis is generated during AI assist
+  useEffect(() => {
+    if (state.diagnosisJustGenerated) {
+      setAnalysisModalOpen(true);
+      dispatch({ type: 'DISMISS_DIAGNOSIS' });
+    }
+  }, [state.diagnosisJustGenerated]);
+
   // Check admin status on mount
   useEffect(() => {
     api.checkAdmin().then(r => setIsAdmin(r.isAdmin)).catch(() => {});
@@ -169,6 +177,9 @@ function AppContent() {
           console.log('[Regen SSE]', evt.event, evt.data);
         }
         switch (evt.event) {
+          case 'debug_raw':
+            console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
+            break;
           case 'step':
             break;
           case 'delta':

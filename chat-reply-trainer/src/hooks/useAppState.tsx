@@ -35,6 +35,7 @@ const initialState: AppState = {
   isDiagnosing: false,
   diagnosisStep: 'idle' as const,
   diagnosisHistory: [],
+  diagnosisJustGenerated: false,
   errorTimestamp: null,
 };
 
@@ -321,6 +322,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, activeDiagnosis: null };
     case 'SET_DIAGNOSIS_HISTORY':
       return { ...state, diagnosisHistory: action.history };
+    case 'SHOW_DIAGNOSIS':
+      return { ...state, diagnosisJustGenerated: true };
+    case 'DISMISS_DIAGNOSIS':
+      return { ...state, diagnosisJustGenerated: false };
     default:
       return state;
   }
@@ -495,6 +500,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             break;
           case 'diagnosis_ready':
             dispatch({ type: 'SET_ACTIVE_DIAGNOSIS', diagnosis: evt.data.diagnosis });
+            dispatch({ type: 'SHOW_DIAGNOSIS' });
+            break;
+          case 'debug_raw':
+            console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
             break;
           case 'analysis':
             dispatch({ type: 'STREAM_ANALYSIS', analysis: evt.data });
@@ -562,6 +571,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'ANALYSIS_STEP', step: evt.data.step });
         } else if (evt.event === 'delta') {
           dispatch({ type: 'ANALYSIS_DELTA', text: evt.data.text });
+        } else if (evt.event === 'debug_raw') {
+          console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
         } else if (evt.event === 'analysis_done') {
           dispatch({ type: 'ANALYSIS_SUCCESS', analysisMode: mode, data: evt.data.result });
           dispatch({ type: 'ANALYSIS_STEP', step: 'done' });
@@ -598,6 +609,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'DIAGNOSIS_STEP', step: evt.data.step === 'analyzing' ? 'analyzing' : evt.data.step === 'parsing' ? 'parsing' : 'generating' });
         } else if (evt.event === 'delta') {
           // Optionally stream text during diagnosis
+        } else if (evt.event === 'debug_raw') {
+          console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
         } else if (evt.event === 'diagnosis_done') {
           dispatch({ type: 'DIAGNOSIS_SUCCESS', diagnosis: evt.data.diagnosis });
           // Refresh diagnosis history
