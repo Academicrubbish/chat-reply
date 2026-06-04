@@ -227,6 +227,28 @@ export function diagnoseStream(
   return sseStream(`/targets/${targetId}/diagnose`, { provider }, onEvent, onError);
 }
 
+// Admin
+export const checkAdmin = () =>
+  request<{ isAdmin: boolean }>('/admin/me');
+
+export const getAdminStats = () =>
+  request<any>('/admin/stats');
+
+export const getAdminUsers = () =>
+  request<any[]>('/admin/users');
+
+export const deleteAdminUser = (id: string) =>
+  request<{ success: boolean }>(`/admin/users/${id}`, { method: 'DELETE' });
+
+export const updateUserRole = (id: string, role: string) =>
+  request<{ success: boolean }>(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
+
+export const getAdminSettings = () =>
+  request<Record<string, string>>('/admin/settings');
+
+export const updateAdminSettings = (settings: Record<string, string>) =>
+  request<{ success: boolean }>('/admin/settings', { method: 'PUT', body: JSON.stringify(settings) });
+
 // Knowledge base
 export const getKnowledgeUnits = () =>
   request<{ units: any[]; total: number }>('/knowledge/units');
