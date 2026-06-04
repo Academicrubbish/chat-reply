@@ -299,7 +299,7 @@ export async function initDb(): Promise<void> {
 
     CREATE TABLE IF NOT EXISTS chat_diagnoses (
       id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
+      session_id TEXT DEFAULT NULL,
       target_id TEXT NOT NULL,
       attitude_level TEXT NOT NULL,
       language_pattern TEXT DEFAULT '',
@@ -313,7 +313,6 @@ export async function initDb(): Promise<void> {
       strategy TEXT DEFAULT '',
       knowledge_ids TEXT DEFAULT '',
       created_at INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES ai_sessions(id),
       FOREIGN KEY (target_id) REFERENCES chat_targets(id)
     );
 
@@ -344,6 +343,35 @@ export async function initDb(): Promise<void> {
     dbWrapper.exec(`ALTER TABLE ai_sessions ADD COLUMN diagnosis_id TEXT DEFAULT NULL`);
   } catch {}
 
+  // Migrate: add role to users (admin/user)
+  try {
+    dbWrapper.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'`);
+    // First user becomes admin
+    dbWrapper.exec(`UPDATE users SET role = 'admin' WHERE rowid = 1`);
+  } catch {}
+
+  // System settings table for admin configuration
+  dbWrapper.exec(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
+  // Initialize default settings
+  const defaultSettings = [
+    ['allow_registration', 'true'],
+    ['max_targets_per_user', '50'],
+    ['max_sessions_per_target', '20'],
+  ];
+  for (const [key, value] of defaultSettings) {
+    const existing = dbWrapper.prepare('SELECT key FROM system_settings WHERE key = ?').get(key);
+    if (!existing) {
+      dbWrapper.prepare('INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)').run(key, value, Date.now());
+    }
+  }
+
   // One-time: auto-activate the latest diagnosis for existing targets
   try {
     dbWrapper.exec(`
@@ -355,6 +383,42 @@ export async function initDb(): Promise<void> {
         AND EXISTS (SELECT 1 FROM chat_diagnoses WHERE chat_diagnoses.target_id = chat_targets.id)
     `);
   } catch {}
+
+  // Migrate: make chat_diagnoses.session_id nullable, remove FK to ai_sessions
+  try {
+    dbWrapper.transaction(() => {
+      dbWrapper.exec(`
+        CREATE TABLE IF NOT EXISTS chat_diagnoses_new (
+          id TEXT PRIMARY KEY,
+          session_id TEXT DEFAULT NULL,
+          target_id TEXT NOT NULL,
+          attitude_level TEXT NOT NULL,
+          language_pattern TEXT DEFAULT '',
+          emotion_type TEXT DEFAULT '',
+          emotion_valence TEXT DEFAULT '',
+          stage TEXT DEFAULT '',
+          upgrade_ready INTEGER DEFAULT 0,
+          upgrade_reason TEXT DEFAULT '',
+          warnings_json TEXT DEFAULT '[]',
+          action TEXT DEFAULT '',
+          strategy TEXT DEFAULT '',
+          knowledge_ids TEXT DEFAULT '',
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (target_id) REFERENCES chat_targets(id)
+        );
+        INSERT INTO chat_diagnoses_new SELECT id, session_id, target_id, attitude_level, language_pattern, emotion_type, emotion_valence, stage, upgrade_ready, upgrade_reason, warnings_json, action, strategy, knowledge_ids, created_at FROM chat_diagnoses;
+        DROP TABLE chat_diagnoses;
+        ALTER TABLE chat_diagnoses_new RENAME TO chat_diagnoses;
+      `);
+      // Re-create indexes
+      dbWrapper.exec(`
+        CREATE INDEX IF NOT EXISTS idx_diagnoses_session ON chat_diagnoses(session_id);
+        CREATE INDEX IF NOT EXISTS idx_diagnoses_target ON chat_diagnoses(target_id, created_at);
+      `);
+    })();
+  } catch {
+    // Already migrated or table doesn't exist yet — ignore
+  }
 
   dbReady = true;
 }

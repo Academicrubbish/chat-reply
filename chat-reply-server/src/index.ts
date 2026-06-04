@@ -55,6 +55,9 @@ app.get('/api/auth/status', (_req: Request, res: Response) => {
 });
 
 app.post('/api/auth/register', async (req: Request, res: Response) => {
+  // Check if registration is allowed
+  const regSetting = db.prepare('SELECT value FROM system_settings WHERE key = ?').get('allow_registration') as any;
+  if (regSetting && regSetting.value === 'false') { res.status(403).json({ error: '注册已关闭，请联系管理员' }); return; }
   const { username, password } = req.body;
   if (!username?.trim() || !password) { res.status(400).json({ error: '用户名和密码不能为空' }); return; }
   if (password.length < 6) { res.status(400).json({ error: '密码至少6位' }); return; }
@@ -159,8 +162,13 @@ app.delete('/api/targets/:id', (req: any, res: Response) => {
   db.transaction(() => {
     const sessionIds = db.prepare('SELECT id FROM ai_sessions WHERE target_id = ?').all(req.params.id).map((s: any) => s.id);
     if (sessionIds.length > 0) {
-      db.prepare(`DELETE FROM ai_messages WHERE session_id IN (${sessionIds.map(() => '?').join(',')})`).run(...sessionIds);
+      const placeholders = sessionIds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM reply_selections WHERE session_id IN (${placeholders})`).run(...sessionIds);
+      db.prepare(`DELETE FROM ai_messages WHERE session_id IN (${placeholders})`).run(...sessionIds);
     }
+    db.prepare('DELETE FROM chat_evaluations WHERE target_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM chat_diagnoses WHERE target_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM user_warnings WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM ai_sessions WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM chat_messages WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM chat_targets WHERE id = ?').run(req.params.id);
@@ -216,6 +224,7 @@ app.delete('/api/messages/:id', (req: any, res: Response) => {
   const existing = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(req.params.id) as any;
   if (!existing) { res.status(404).json({ error: '消息不存在' }); return; }
   if (!verifyTargetOwnership(existing.target_id, req.user.userId)) { res.status(404).json({ error: '消息不存在' }); return; }
+  db.prepare('DELETE FROM reply_selections WHERE chat_message_id = ?').run(req.params.id);
   db.prepare('DELETE FROM chat_messages WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
@@ -255,6 +264,7 @@ app.delete('/api/sessions/:sessionId', (req: any, res: Response) => {
   if (!verifySessionOwnership(req.params.sessionId, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
   const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
   db.transaction(() => {
+    db.prepare('DELETE FROM reply_selections WHERE session_id = ?').run(req.params.sessionId);
     db.prepare('DELETE FROM ai_messages WHERE session_id = ?').run(req.params.sessionId);
     db.prepare('DELETE FROM ai_sessions WHERE id = ?').run(req.params.sessionId);
     if (session.is_active === 1) {
@@ -398,7 +408,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
     // SSE headers
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    let clientDisconnected = false;
+    req.on('close', () => { clientDisconnected = true; });
+    const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
 
     // ===== Diagnosis-first: ensure diagnosis exists =====
     let diagnosis: any = null;
@@ -419,6 +431,10 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       try {
         diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
         send('diagnosis_ready', { diagnosis });
+        // Send plan derived from diagnosis
+        if (diagnosis.action || diagnosis.strategy) {
+          send('plan', { goal: diagnosis.action, nextStep: diagnosis.strategy });
+        }
       } catch (diagErr: any) {
         console.error('[Auto-Diagnose Error]', diagErr.message);
         // Diagnosis failed: still try to generate without diagnosis context
@@ -452,8 +468,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
     try {
       let sentReplyCount = 0;
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 2048 : 4096)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
         raw += delta;
+        if (clientDisconnected) break;
         send('delta', { text: delta });
 
         if (isQuick) {
@@ -616,7 +633,9 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 
     // SSE headers
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    let clientDisconnected = false;
+    req.on('close', () => { clientDisconnected = true; });
+    const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
 
     // ===== Diagnosis-first: ensure diagnosis exists =====
     let diagnosis: any = null;
@@ -632,6 +651,9 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       try {
         diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
         send('diagnosis_ready', { diagnosis });
+        if (diagnosis.action || diagnosis.strategy) {
+          send('plan', { goal: diagnosis.action, nextStep: diagnosis.strategy });
+        }
       } catch (diagErr: any) {
         console.error('[Auto-Diagnose Error]', diagErr.message);
       }
@@ -656,8 +678,9 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     let raw = '';
     let sentReplyCount = 0;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 2048 : 4096)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
         raw += delta;
+        if (clientDisconnected) break;
         send('delta', { text: delta });
 
         if (isQuick) {
@@ -735,7 +758,9 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
 
     // SSE headers
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    let clientDisconnected = false;
+    req.on('close', () => { clientDisconnected = true; });
+    const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
 
     send('step', { step: 'analyzing' });
 
@@ -748,8 +773,9 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     let raw = '';
     const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 8192)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
         raw += delta;
+        if (clientDisconnected) break;
         send('delta', { text: delta });
       }
     } finally {
@@ -760,17 +786,31 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
       console.error('[Diagnose Parse Error] Raw:', raw.slice(0, 500));
-      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试' })}\n\n`);
+      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试', rawLength: raw.length })}\n\n`);
       res.end();
       return;
     }
 
-    // Validate: must have attitude and emotion
+    // Validate: must have attitude or at minimum some structure
     if (!parsed.attitude?.level || !parsed.emotion?.type) {
       console.error('[Diagnose Invalid] LLM returned unexpected structure:', JSON.stringify(parsed).slice(0, 500));
-      res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果格式异常，请重试' })}\n\n`);
-      res.end();
-      return;
+      // Graceful degradation: fill in missing fields with defaults instead of erroring
+      parsed = {
+        ...parsed,
+        attitude: parsed.attitude || {},
+        emotion: parsed.emotion || {},
+        diagnosis: parsed.diagnosis || {},
+        nextStep: parsed.nextStep || {},
+      };
+      parsed.attitude.level = parsed.attitude.level || '回应';
+      parsed.attitude.languagePattern = parsed.attitude.languagePattern || '无法判断';
+      parsed.attitude.detail = parsed.attitude.detail || '数据不足以做出准确判断';
+      parsed.attitude.evidence = parsed.attitude.evidence || '';
+      parsed.emotion.type = parsed.emotion.type || '未知';
+      parsed.emotion.valence = parsed.emotion.valence || '中性';
+      parsed.emotion.detail = parsed.emotion.detail || '情绪状态不明确';
+      parsed.emotion.evidence = parsed.emotion.evidence || '';
+      console.log('[Diagnose] Using degraded fallback structure');
     }
 
     // Save to chat_diagnoses
@@ -778,7 +818,7 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     const diagId = uuid();
     const now = Date.now();
     db.prepare(`INSERT INTO chat_diagnoses (id, session_id, target_id, attitude_level, language_pattern, emotion_type, emotion_valence, stage, upgrade_ready, upgrade_reason, warnings_json, action, strategy, knowledge_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(diagId, '', target.id,
+      .run(diagId, null, target.id,
         parsed.attitude?.level || '', parsed.attitude?.languagePattern || '',
         parsed.emotion?.type || '', parsed.emotion?.valence || '',
         diag.stage || '', diag.upgradeReady ? 1 : 0, diag.upgradeReason || '',
@@ -878,17 +918,33 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
     { role: 'user', content: '请分析对方当前的状态' },
   ];
 
-  const raw = await chatCompletion(messages, provider, 8192);
+  const raw = await chatCompletion(messages, provider, 16384);
   let parsed = parseJsonSafely(raw);
   if (!parsed) {
     console.error('[Auto-Diagnose Parse Error] Raw:', raw.slice(0, 500));
     throw new Error('自动诊断解析失败');
   }
 
-  // Validate: must have attitude and emotion
+  // Validate: must have attitude or at minimum some structure
   if (!parsed.attitude?.level || !parsed.emotion?.type) {
     console.error('[Auto-Diagnose Invalid] Unexpected structure:', JSON.stringify(parsed).slice(0, 500));
-    throw new Error('自动诊断结果格式异常');
+    // Graceful degradation instead of throwing
+    parsed = {
+      ...parsed,
+      attitude: parsed.attitude || {},
+      emotion: parsed.emotion || {},
+      diagnosis: parsed.diagnosis || {},
+      nextStep: parsed.nextStep || {},
+    };
+    parsed.attitude.level = parsed.attitude.level || '回应';
+    parsed.attitude.languagePattern = parsed.attitude.languagePattern || '无法判断';
+    parsed.attitude.detail = parsed.attitude.detail || '数据不足以做出准确判断';
+    parsed.attitude.evidence = parsed.attitude.evidence || '';
+    parsed.emotion.type = parsed.emotion.type || '未知';
+    parsed.emotion.valence = parsed.emotion.valence || '中性';
+    parsed.emotion.detail = parsed.emotion.detail || '情绪状态不明确';
+    parsed.emotion.evidence = parsed.emotion.evidence || '';
+    console.log('[Auto-Diagnose] Using degraded fallback structure');
   }
 
   const diag = parsed.diagnosis || {};
@@ -956,7 +1012,9 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
 
     // SSE headers
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    const send = (event: string, data: any) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    let clientDisconnected = false;
+    req.on('close', () => { clientDisconnected = true; });
+    const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
 
     send('step', { step: 'analyzing' });
 
@@ -978,8 +1036,9 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     let raw = '';
     const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 8192)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
         raw += delta;
+        if (clientDisconnected) break;
         send('delta', { text: delta });
       }
     } finally {
@@ -991,7 +1050,7 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
       console.error('[Analyze Parse Error] Raw:', raw.slice(0, 500));
-      res.write(`event: error\ndata: ${JSON.stringify({ message: '分析结果解析失败，请重试' })}\n\n`);
+      res.write(`event: error\ndata: ${JSON.stringify({ message: '分析结果解析失败，请重试', rawLength: raw.length })}\n\n`);
       res.end();
       return;
     }
@@ -1107,6 +1166,123 @@ app.post('/api/sessions/:sessionId/feedback', (req: any, res: Response) => {
 
   db.prepare('INSERT INTO ai_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(uuid(), req.params.sessionId, 'user', JSON.stringify({ type: 'feedback', replyId, rating }), Date.now());
+  res.json({ success: true });
+});
+
+// ===== Admin Middleware =====
+function adminMiddleware(req: any, res: Response, next: any) {
+  const user = db.prepare('SELECT role FROM users WHERE id = ?').get(req.user.userId) as any;
+  if (!user || user.role !== 'admin') {
+    res.status(403).json({ error: '需要管理员权限' });
+    return;
+  }
+  next();
+}
+
+// ===== Admin API Routes =====
+
+// Check if current user is admin
+app.get('/api/admin/me', authMiddleware, (req: any, res: Response) => {
+  const user = db.prepare('SELECT role FROM users WHERE id = ?').get(req.user.userId) as any;
+  res.json({ isAdmin: user?.role === 'admin' });
+});
+
+// System statistics
+app.get('/api/admin/stats', authMiddleware, adminMiddleware, (_req: any, res: Response) => {
+  const users = (db.prepare('SELECT COUNT(*) as count FROM users').get() as any).count;
+  const targets = (db.prepare('SELECT COUNT(*) as count FROM chat_targets').get() as any).count;
+  const messages = (db.prepare('SELECT COUNT(*) as count FROM chat_messages').get() as any).count;
+  const sessions = (db.prepare('SELECT COUNT(*) as count FROM ai_sessions').get() as any).count;
+  const diagnoses = (db.prepare('SELECT COUNT(*) as count FROM chat_diagnoses').get() as any).count;
+  const evaluations = (db.prepare('SELECT COUNT(*) as count FROM chat_evaluations').get() as any).count;
+
+  // Recent activity (last 24h)
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const recentMessages = (db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE created_at > ?').get(oneDayAgo) as any).count;
+  const recentSessions = (db.prepare('SELECT COUNT(*) as count FROM ai_sessions WHERE created_at > ?').get(oneDayAgo) as any).count;
+
+  // Database file size
+  let dbSizeKB = 0;
+  try {
+    const fsSync = require('fs');
+    const pathSync = require('path');
+    const stat = fsSync.statSync(pathSync.join(process.cwd(), 'data', 'chat-trainer.db'));
+    dbSizeKB = Math.round(stat.size / 1024);
+  } catch {}
+
+  res.json({
+    users, targets, messages, sessions, diagnoses, evaluations,
+    recentMessages, recentSessions, dbSizeKB,
+  });
+});
+
+// List all users with usage stats
+app.get('/api/admin/users', authMiddleware, adminMiddleware, (_req: any, res: Response) => {
+  const users = db.prepare('SELECT id, username, role, created_at FROM users ORDER BY created_at ASC').all() as any[];
+  const usersWithStats = users.map(u => {
+    const targetCount = (db.prepare('SELECT COUNT(*) as count FROM chat_targets WHERE user_id = ?').get(u.id) as any).count;
+    const messageCount = (db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE target_id IN (SELECT id FROM chat_targets WHERE user_id = ?)').get(u.id) as any).count;
+    const sessionCount = (db.prepare('SELECT COUNT(*) as count FROM ai_sessions WHERE target_id IN (SELECT id FROM chat_targets WHERE user_id = ?)').get(u.id) as any).count;
+    return { ...u, targetCount, messageCount, sessionCount };
+  });
+  res.json(usersWithStats);
+});
+
+// Delete a user and all their data
+app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, (req: any, res: Response) => {
+  const userId = req.params.id;
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+  if (!user) { res.status(404).json({ error: '用户不存在' }); return; }
+  if (user.role === 'admin') { res.status(400).json({ error: '不能删除管理员账户' }); return; }
+
+  db.transaction(() => {
+    const targetIds = db.prepare('SELECT id FROM chat_targets WHERE user_id = ?').all(userId).map((t: any) => t.id);
+    for (const targetId of targetIds) {
+      const sessionIds = db.prepare('SELECT id FROM ai_sessions WHERE target_id = ?').all(targetId).map((s: any) => s.id);
+      for (const sessionId of sessionIds) {
+        db.prepare('DELETE FROM ai_messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM reply_selections WHERE session_id = ?').run(sessionId);
+      }
+      db.prepare('DELETE FROM ai_sessions WHERE target_id = ?').run(targetId);
+      db.prepare('DELETE FROM chat_messages WHERE target_id = ?').run(targetId);
+      db.prepare('DELETE FROM chat_diagnoses WHERE target_id = ?').run(targetId);
+      db.prepare('DELETE FROM chat_evaluations WHERE target_id = ?').run(targetId);
+      db.prepare('DELETE FROM user_warnings WHERE target_id = ?').run(targetId);
+    }
+    db.prepare('DELETE FROM chat_targets WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  })();
+  res.json({ success: true });
+});
+
+// Change user role
+app.put('/api/admin/users/:id/role', authMiddleware, adminMiddleware, (req: any, res: Response) => {
+  const { role } = req.body;
+  if (!['admin', 'user'].includes(role)) { res.status(400).json({ error: '无效角色' }); return; }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+  if (!user) { res.status(404).json({ error: '用户不存在' }); return; }
+  db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, req.params.id);
+  res.json({ success: true });
+});
+
+// Get system settings
+app.get('/api/admin/settings', authMiddleware, adminMiddleware, (_req: any, res: Response) => {
+  const rows = db.prepare('SELECT key, value FROM system_settings').all() as any[];
+  const settings: Record<string, string> = {};
+  for (const row of rows) {
+    settings[row.key] = row.value;
+  }
+  res.json(settings);
+});
+
+// Update system settings
+app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req: any, res: Response) => {
+  const allowedKeys = ['allow_registration', 'max_targets_per_user', 'max_sessions_per_target'];
+  for (const [key, value] of Object.entries(req.body)) {
+    if (allowedKeys.includes(key)) {
+      db.prepare('INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)').run(key, String(value), Date.now());
+    }
+  }
   res.json({ success: true });
 });
 

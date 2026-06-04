@@ -40,7 +40,7 @@ export function getAvailableModels(): { provider: string; label: string; model: 
     .map(m => ({ provider: m.provider, label: m.label, model: process.env[m.modelEnv] || '' }));
 }
 
-export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 4096): Promise<string> {
+export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 16384): Promise<string> {
   const response = await getClient(provider).chat.completions.create({
     model: getModel(provider),
     messages: messages as any,
@@ -50,7 +50,7 @@ export async function chatCompletion(messages: Array<{ role: string; content: st
   return response.choices[0].message.content || '';
 }
 
-export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxRetries = 1, maxTokens = 4096): AsyncGenerator<string> {
+export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxRetries = 1, maxTokens = 16384): AsyncGenerator<string> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
