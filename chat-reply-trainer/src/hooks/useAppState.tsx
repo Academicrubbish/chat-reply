@@ -1,6 +1,7 @@
 import { createContext, useContext, useReducer, useRef, useEffect, useState, type Dispatch, type ReactNode } from 'react';
 import type { AppState, AppAction, ChatMessage, ModelOption, GenerationStep, GenerateMode } from '../types';
 import * as api from '../services/api';
+import { createSSEHandlers } from '../utils/sseHandlers';
 
 const STEP_ORDER: Record<string, number> = { idle: 0, diagnosing: 1, analyze: 2, generating: 3, parsing: 4, done: 5 };
 
@@ -25,7 +26,6 @@ const initialState: AppState = {
   replyVersions: [],
   activeVersionIndex: 0,
   replySelections: [],
-  analysisDrawerOpen: false,
   analysisResult: null,
   analysisMode: null,
   isAnalyzing: false,
@@ -283,7 +283,6 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'TRIGGER_ANALYSIS':
       return {
         ...state,
-        analysisDrawerOpen: false,
         analysisMode: action.analysisMode,
         analysisResult: null,
         isAnalyzing: true,
@@ -292,13 +291,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: null,
       };
     case 'ANALYSIS_SUCCESS':
-      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisStep: 'idle' as const, analysisDrawerOpen: true };
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, isAnalyzing: false, analysisStep: 'idle' as const };
     case 'ANALYSIS_FAILURE':
       return { ...state, isAnalyzing: false, analysisStep: 'idle' as const, error: action.error, errorTimestamp: Date.now() };
-    case 'CLOSE_ANALYSIS_DRAWER':
-      return { ...state, analysisDrawerOpen: false };
-    case 'OPEN_ANALYSIS_DRAWER':
-      return { ...state, analysisDrawerOpen: true, analysisResult: null, analysisMode: null };
     case 'ANALYSIS_STEP':
       return { ...state, analysisStep: action.step };
     case 'ANALYSIS_DELTA':
@@ -306,7 +301,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'SET_ANALYSIS_HISTORY':
       return { ...state, analysisHistory: action.history };
     case 'VIEW_HISTORY_ANALYSIS':
-      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode, analysisDrawerOpen: true };
+      return { ...state, analysisResult: action.data, analysisMode: action.analysisMode };
     // Diagnosis actions
     case 'SET_ACTIVE_DIAGNOSIS':
       return { ...state, activeDiagnosis: action.diagnosis };
@@ -442,12 +437,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const triggerAI = async () => {
     const targetId = stateRef.current.currentTargetId;
     if (!targetId) return;
-    // Cancel any previous in-flight request
     abortAllStreams();
 
     const mode = aiMode === 'quick' ? 'quick' : 'full';
 
-    // Ensure session exists BEFORE dispatching TRIGGER_AI (UPDATE_SESSIONS resets phase)
     let sessionId = stateRef.current.currentSessionId;
     if (!sessionId) {
       try {
@@ -464,90 +457,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'TRIGGER_AI', mode });
     const lastHerMsg = [...stateRef.current.messages].reverse().find(m => m.role === 'her');
 
-    // Timeout: advance step if backend is slow
-    const stepTimer = setTimeout(() => {
-      const cur = stateRef.current.generationStep;
-      const next = cur === 'diagnosing' ? 'analyze' : 'generating';
-      dispatch({ type: 'SET_GENERATION_STEP', step: next });
-    }, 3000);
-
-    // Heartbeat timeout: 15s without any event = connection lost
-    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-    const resetHeartbeat = () => {
-      if (heartbeatTimer) clearTimeout(heartbeatTimer);
-      heartbeatTimer = setTimeout(() => {
-        dispatch({ type: 'GENERATE_FAILURE', error: '连接超时，请重试' });
-      }, 15000);
-    };
-    resetHeartbeat();
+    const handlers = createSSEHandlers(dispatch, stateRef as any, {
+      tag: 'SSE',
+      onDone: () => {
+        loadSessionAiMessages(sessionId!, dispatch);
+        if (stateRef.current.currentTargetId) {
+          api.getSessions(stateRef.current.currentTargetId).then(sessions => {
+            dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: sessionId });
+          });
+        }
+      },
+    });
 
     const ctrl = api.generateReplyStream(
       sessionId,
       lastHerMsg?.text || '',
       selectedProvider,
-      (evt) => {
-        resetHeartbeat();
-        if (evt.event !== 'heartbeat' && evt.event !== 'delta') {
-          console.log('[SSE]', evt.event, evt.data);
-        }
-        switch (evt.event) {
-          case 'step':
-            if (evt.data.step === 'auto_diagnosing') {
-              dispatch({ type: 'SET_GENERATION_STEP', step: 'diagnosing' });
-            }
-            break;
-          case 'delta':
-            clearTimeout(stepTimer);
-            dispatch({ type: 'STREAM_DELTA', text: evt.data.text });
-            break;
-          case 'diagnosis_ready':
-            dispatch({ type: 'SET_ACTIVE_DIAGNOSIS', diagnosis: evt.data.diagnosis });
-            dispatch({ type: 'SHOW_DIAGNOSIS' });
-            if (stateRef.current.generationStep === 'diagnosing') {
-              dispatch({ type: 'SET_GENERATION_STEP', step: 'analyze' });
-            }
-            break;
-          case 'debug_raw':
-            console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
-            break;
-          case 'analysis':
-            dispatch({ type: 'STREAM_ANALYSIS', analysis: evt.data });
-            break;
-          case 'plan':
-            dispatch({ type: 'SET_PLAN', plan: evt.data });
-            break;
-          case 'replies':
-            dispatch({ type: 'STREAM_REPLIES', replies: evt.data });
-            break;
-          case 'reply_ready':
-            dispatch({ type: 'STREAM_REPLY_READY', reply: evt.data.reply, index: evt.data.index });
-            break;
-          case 'done':
-            clearTimeout(stepTimer);
-            if (heartbeatTimer) clearTimeout(heartbeatTimer);
-            dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
-            loadSessionAiMessages(sessionId, dispatch);
-            // Refresh sessions to update context_tokens in SessionBar
-            if (stateRef.current.currentTargetId) {
-              api.getSessions(stateRef.current.currentTargetId).then(sessions => {
-                dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: sessionId });
-              });
-            }
-            break;
-          case 'error':
-            clearTimeout(stepTimer);
-            if (heartbeatTimer) clearTimeout(heartbeatTimer);
-            dispatch({ type: 'GENERATE_FAILURE', error: evt.data.message });
-            break;
-        }
-      },
-      (err) => {
-        clearTimeout(stepTimer);
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
-        if (err.name !== 'AbortError') {
-          dispatch({ type: 'GENERATE_FAILURE', error: err.message });
-        }
-      },
+      handlers.onEvent,
+      handlers.onError,
       mode,
     );
     activeAbortRef.current = ctrl;

@@ -200,7 +200,6 @@ export interface AppState {
   replyVersions: ReplyVersion[];
   activeVersionIndex: number;
   replySelections: ReplySelection[];
-  analysisDrawerOpen: boolean;
   analysisResult: AdvisorAnalysis | ReviewAnalysis | null;
   analysisMode: 'advisor' | 'review' | null;
   isAnalyzing: boolean;
@@ -247,8 +246,6 @@ export type AppAction =
   | { type: 'TRIGGER_ANALYSIS'; analysisMode: 'advisor' | 'review' }
   | { type: 'ANALYSIS_SUCCESS'; analysisMode: 'advisor' | 'review'; data: any }
   | { type: 'ANALYSIS_FAILURE'; error: string }
-  | { type: 'CLOSE_ANALYSIS_DRAWER' }
-  | { type: 'OPEN_ANALYSIS_DRAWER' }
   | { type: 'ANALYSIS_STEP'; step: 'analyzing' | 'generating' | 'parsing' | 'done' }
   | { type: 'ANALYSIS_DELTA'; text: string }
   | { type: 'SET_ANALYSIS_HISTORY'; history: AnalysisRecord[] }

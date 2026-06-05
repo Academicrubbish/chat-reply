@@ -5,6 +5,7 @@ import { AppProvider, useAppState } from './hooks/useAppState';
 import * as api from './services/api';
 import { parseChatWithMeta } from './utils/parseChat';
 import type { ParsedMessage } from './utils/parseChat';
+import { createSSEHandlers } from './utils/sseHandlers';
 import { shouldStartTour, startTour } from './utils/tourGuide';
 import ErrorBoundary from './components/ErrorBoundary';
 import SetupPage from './components/SetupPage';
@@ -145,87 +146,29 @@ function AppContent() {
     if (!s.currentSessionId || s.phase === 'generating') return;
     dispatch({ type: 'TRIGGER_REGENERATE' });
 
-    // Get current round's roundId from replyVersions
     const currentRoundId = s.replyVersions[s.activeVersionIndex]?.roundId;
     const mode = aiMode === 'quick' ? 'quick' : 'full';
 
-    // 2s timeout: advance step if no delta yet
-    const analyzeTimer = setTimeout(() => {
-      dispatch({ type: 'SET_GENERATION_STEP', step: 'generating' });
-    }, 2000);
-
-    // Heartbeat timeout: 15s without any event = connection lost
-    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-    const resetHeartbeat = () => {
-      if (heartbeatTimer) clearTimeout(heartbeatTimer);
-      heartbeatTimer = setTimeout(() => {
-        dispatch({ type: 'GENERATE_FAILURE', error: '连接超时，请重试' });
-      }, 15000);
-    };
-    resetHeartbeat();
+    const handlers = createSSEHandlers(dispatch, stateRef, {
+      tag: 'Regen SSE',
+      extra: {
+        delta: () => { dispatch({ type: 'ADVANCE_REGEN_STEP' }); },
+      },
+      onDone: () => {
+        if (stateRef.current.currentTargetId) {
+          api.getSessions(stateRef.current.currentTargetId).then(sessions => {
+            dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: stateRef.current.currentSessionId });
+          });
+        }
+      },
+    });
 
     const ctrl = api.regenerateStream(
       s.currentSessionId,
-      {
-        mode,
-        provider: selectedProvider,
-        roundId: currentRoundId,
-      },
-      (evt) => {
-        resetHeartbeat();
-        if (evt.event !== 'heartbeat' && evt.event !== 'delta') {
-          console.log('[Regen SSE]', evt.event, evt.data);
-        }
-        switch (evt.event) {
-          case 'debug_raw':
-            console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
-            break;
-          case 'step':
-            break;
-          case 'delta':
-            clearTimeout(analyzeTimer);
-            dispatch({ type: 'ADVANCE_REGEN_STEP' });
-            dispatch({ type: 'STREAM_DELTA', text: evt.data.text });
-            break;
-          case 'analysis':
-            dispatch({ type: 'STREAM_ANALYSIS', analysis: evt.data });
-            break;
-          case 'plan':
-            dispatch({ type: 'SET_PLAN', plan: evt.data });
-            break;
-          case 'replies':
-            dispatch({ type: 'STREAM_REPLIES', replies: evt.data });
-            break;
-          case 'reply_ready':
-            dispatch({ type: 'STREAM_REPLY_READY', reply: evt.data.reply, index: evt.data.index });
-            break;
-          case 'done':
-            clearTimeout(analyzeTimer);
-            if (heartbeatTimer) clearTimeout(heartbeatTimer);
-            dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
-            // Refresh session data
-            if (stateRef.current.currentTargetId) {
-              api.getSessions(stateRef.current.currentTargetId).then(sessions => {
-                dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: stateRef.current.currentSessionId });
-              });
-            }
-            break;
-          case 'error':
-            clearTimeout(analyzeTimer);
-            if (heartbeatTimer) clearTimeout(heartbeatTimer);
-            dispatch({ type: 'GENERATE_FAILURE', error: evt.data.message });
-            break;
-        }
-      },
-      (err) => {
-        clearTimeout(analyzeTimer);
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
-        if (err.name !== 'AbortError') {
-          dispatch({ type: 'GENERATE_FAILURE', error: err.message });
-        }
-      },
+      { mode, provider: selectedProvider, roundId: currentRoundId },
+      handlers.onEvent,
+      handlers.onError,
     );
-    // Track abort controller for cleanup
     regenAbortRef.current?.abort();
     regenAbortRef.current = ctrl;
   };
@@ -349,7 +292,7 @@ function AppContent() {
           <Toolbar
             target={currentTarget}
             onEditTarget={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
-            onAIAssist={() => triggerAI()}
+            onAIAssist={() => { triggerAI(); if (isMobile) setMobileTab('ai'); }}
             isGenerating={state.phase === 'generating' || state.isAnalyzing}
             aiMode={aiMode}
             session={state.sessions.find(s => s.id === state.currentSessionId) || null}

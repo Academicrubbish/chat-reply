@@ -1,10 +1,11 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Empty, Button, Input, Space, Select, Alert } from 'antd';
-import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined, WechatOutlined, PlusOutlined } from '@ant-design/icons';
+import { Empty, Button, Input, Space, Alert } from 'antd';
+import { EnvironmentOutlined, FileAddOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { ChatMessage } from '../types';
 import type { ParsedMessage, NicknameMap } from '../utils/parseChat';
 import { parseChatWithMeta } from '../utils/parseChat';
 import ChatBubble from './ChatBubble';
+import ChatImportPreview from './ChatImportPreview';
 
 interface ChatHistoryProps {
   messages: ChatMessage[];
@@ -30,11 +31,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline scene insert in preview
   const [insertSceneIndex, setInsertSceneIndex] = useState<number | null>(null);
   const [insertSceneText, setInsertSceneText] = useState('');
-
-  // WeChat nickname mapping state
   const [wechatNicknames, setWechatNicknames] = useState<string[]>([]);
   const [herNickname, setHerNickname] = useState<string>('');
   const [meNickname, setMeNickname] = useState<string>('');
@@ -91,12 +89,11 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     setParsedPreview(result.messages);
     setParseWarnings(result.warnings);
 
-    // If WeChat format detected with nicknames, show mapping UI
     if (result.nicknames && result.nicknames.length >= 2) {
       setWechatNicknames(result.nicknames);
       setHerNickname(result.nicknames[0]);
       setMeNickname(result.nicknames[1]);
-      setParsedPreview([]); // Don't show preview until mapping is confirmed
+      setParsedPreview([]);
     } else {
       setWechatNicknames([]);
     }
@@ -128,9 +125,6 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     resetImportState();
   };
 
-  // WeChat nickname is being selected
-  const showNicknamePicker = wechatNicknames.length >= 2 && parsedPreview.length === 0;
-
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5">
       {messages.length === 0 && (
@@ -146,7 +140,6 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
         />
       ))}
 
-      {/* Scene input area */}
       {insertMode === 'scene' && (
         <div className="self-center max-w-[90%] w-full" style={{
           background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 8, padding: 8,
@@ -172,7 +165,6 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
         </div>
       )}
 
-      {/* Import preview area */}
       {insertMode === 'import' && (
         <div className="self-center max-w-[90%] w-full" style={{
           background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 8,
@@ -203,130 +195,25 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
               </span>
             }
           />
-
-          {/* WeChat nickname picker */}
-          {showNicknamePicker && (
-            <div style={{
-              marginTop: 8, padding: '8px 10px',
-              background: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 6,
-            }}>
-              <div style={{ fontSize: 11, color: '#096dd9', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <WechatOutlined /> 检测到微信导出格式，共 {wechatNicknames.length} 位参与者，请选择角色映射：
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 12, color: '#f48fb1', fontWeight: 500 }}>她：</span>
-                  <Select
-                    size="small"
-                    value={herNickname}
-                    onChange={setHerNickname}
-                    style={{ minWidth: 120 }}
-                    options={wechatNicknames.map(n => ({ label: n, value: n }))}
-                  />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 12, color: '#66bb6a', fontWeight: 500 }}>我：</span>
-                  <Select
-                    size="small"
-                    value={meNickname}
-                    onChange={setMeNickname}
-                    style={{ minWidth: 120 }}
-                    options={wechatNicknames.map(n => ({ label: n, value: n }))}
-                  />
-                </div>
-                <Button size="small" type="primary" onClick={handleNicknameConfirm}
-                  disabled={!herNickname || !meNickname || herNickname === meNickname}>
-                  确认
-                </Button>
-              </div>
-              {herNickname === meNickname && herNickname && (
-                <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 4 }}>「她」和「我」不能选同一个人</div>
-              )}
-            </div>
-          )}
-
-          {parsedPreview.length > 0 && (
-            <div style={{ marginTop: 6, maxHeight: 180, overflowY: 'auto', fontSize: 11, lineHeight: 1.6 }}>
-              {/* Insert scene at the top */}
-              {insertSceneIndex === 0 ? (
-                <div style={{
-                  background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4,
-                  padding: '4px 6px', marginBottom: 2, display: 'flex', gap: 4, alignItems: 'center',
-                }}>
-                  <EnvironmentOutlined style={{ color: '#8c6d1f', fontSize: 10 }} />
-                  <Input
-                    size="small"
-                    value={insertSceneText}
-                    onChange={e => setInsertSceneText(e.target.value)}
-                    placeholder="输入场景描述..."
-                    style={{ flex: 1, fontSize: 11 }}
-                    autoFocus
-                    onPressEnter={() => handleInsertScene(0)}
-                  />
-                  <Button size="small" type="link" icon={<CheckOutlined />} style={{ fontSize: 10 }}
-                    onClick={() => handleInsertScene(0)} />
-                  <Button size="small" type="link" icon={<CloseOutlined />} style={{ fontSize: 10 }}
-                    onClick={() => { setInsertSceneIndex(null); setInsertSceneText(''); }} />
-                </div>
-              ) : (
-                <div
-                  style={{ textAlign: 'center', margin: '2px 0', opacity: 0.5 }}
-                  className="hover:opacity-100 cursor-pointer"
-                  onClick={() => setInsertSceneIndex(0)}
-                >
-                  <PlusOutlined style={{ fontSize: 10, color: '#8c6d1f' }} />
-                  <span style={{ fontSize: 10, color: '#8c6d1f', marginLeft: 2 }}>场景</span>
-                </div>
-              )}
-              {parsedPreview.map((m, i) => (
-                <React.Fragment key={i}>
-                  <div style={{ color: m.role === 'scene' ? '#8c6d1f' : m.role === 'her' ? '#f48fb1' : '#66bb6a' }}>
-                    {m.role === 'scene' ? '场景' : m.role === 'her' ? '她' : '我'}：{m.text.slice(0, 50)}{m.text.length > 50 ? '...' : ''}
-                  </div>
-                  {/* Insert scene between messages */}
-                  {insertSceneIndex === i + 1 ? (
-                    <div style={{
-                      background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4,
-                      padding: '4px 6px', margin: '2px 0', display: 'flex', gap: 4, alignItems: 'center',
-                    }}>
-                      <EnvironmentOutlined style={{ color: '#8c6d1f', fontSize: 10 }} />
-                      <Input
-                        size="small"
-                        value={insertSceneText}
-                        onChange={e => setInsertSceneText(e.target.value)}
-                        placeholder="输入场景描述..."
-                        style={{ flex: 1, fontSize: 11 }}
-                        autoFocus
-                        onPressEnter={() => handleInsertScene(i + 1)}
-                      />
-                      <Button size="small" type="link" icon={<CheckOutlined />} style={{ fontSize: 10 }}
-                        onClick={() => handleInsertScene(i + 1)} />
-                      <Button size="small" type="link" icon={<CloseOutlined />} style={{ fontSize: 10 }}
-                        onClick={() => { setInsertSceneIndex(null); setInsertSceneText(''); }} />
-                    </div>
-                  ) : (
-                    <div
-                      style={{ textAlign: 'center', margin: '2px 0', opacity: 0.5 }}
-                      className="hover:opacity-100 cursor-pointer"
-                      onClick={() => setInsertSceneIndex(i + 1)}
-                    >
-                      <PlusOutlined style={{ fontSize: 10, color: '#8c6d1f' }} />
-                      <span style={{ fontSize: 10, color: '#8c6d1f', marginLeft: 2 }}>场景</span>
-                    </div>
-                  )}
-                </React.Fragment>
-              ))}
-              <div style={{ color: '#999', marginTop: 2 }}>共 {parsedPreview.length} 条</div>
-            </div>
-          )}
-          {parseWarnings.length > 0 && (
-            <div style={{ marginTop: 4, fontSize: 11, color: '#fa8c16' }}>
-              {parseWarnings.map((w, i) => <div key={i}>{w}</div>)}
-            </div>
-          )}
+          <ChatImportPreview
+            messages={parsedPreview}
+            warnings={parseWarnings}
+            wechatNicknames={wechatNicknames}
+            herNickname={herNickname}
+            meNickname={meNickname}
+            onHerNicknameChange={setHerNickname}
+            onMeNicknameChange={setMeNickname}
+            onNicknameConfirm={handleNicknameConfirm}
+            insertSceneIndex={insertSceneIndex}
+            insertSceneText={insertSceneText}
+            onSetInsertSceneIndex={setInsertSceneIndex}
+            onSetInsertSceneText={setInsertSceneText}
+            onInsertScene={handleInsertScene}
+            variant="compact"
+          />
           <Space size={4} style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end' }}>
             <Button size="small" icon={<CloseOutlined />} onClick={cancelInsert}>取消</Button>
-            {parsedPreview.length === 0 && !showNicknamePicker ? (
+            {parsedPreview.length === 0 && wechatNicknames.length < 2 ? (
               <Button size="small" type="primary" onClick={handleParseImport} disabled={!importText.trim()}>
                 预览
               </Button>
@@ -342,7 +229,6 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
 
       <div ref={bottomRef} />
 
-      {/* Action buttons */}
       {insertMode === 'none' && (onAddScene || onImportMessages) && (
         <div className="self-center flex gap-2" style={{ padding: '4px 0' }}>
           {onAddScene && (
