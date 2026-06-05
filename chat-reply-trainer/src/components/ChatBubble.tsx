@@ -88,7 +88,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
               >
                 {onEdit && (
                   <Button type="text" size="small" icon={<EditOutlined />}
-                    aria-label="编辑消息"
                     aria-label="编辑场景"
                     style={{ fontSize: 10, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.12)', borderRadius: 4 }}
                     onClick={startEdit} />
@@ -96,7 +95,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
                 {onDelete && (
                   <Popconfirm title="确定删除这条场景？" onConfirm={() => onDelete(message.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
                     <Button type="text" size="small" icon={<DeleteOutlined />}
-                      aria-label="删除消息"
                       aria-label="删除场景"
                       style={{ fontSize: 10, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.12)', borderRadius: 4, color: '#ff4d4f' }} />
                   </Popconfirm>

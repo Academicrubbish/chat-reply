@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Input, Button, Select, Alert, Card } from 'antd';
 import { EnvironmentOutlined, CheckOutlined, CloseOutlined, WechatOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ParsedMessage } from '../utils/parseChat';
