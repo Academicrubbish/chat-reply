@@ -132,6 +132,7 @@ const strategyTagColor: Record<string, string> = {
 };
 
 const STEP_ITEMS = [
+  { key: 'diagnosing', label: '分析聊天对象特征' },
   { key: 'analyze', label: '分析消息' },
   { key: 'generating', label: '识别信号与匹配策略' },
   { key: 'parsing', label: '生成回复' },

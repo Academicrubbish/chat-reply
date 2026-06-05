@@ -204,6 +204,24 @@ app.post('/api/targets/:id/messages', (req: any, res: Response) => {
   res.status(201).json(db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(id));
 });
 
+app.post('/api/targets/:id/messages/batch', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
+  const { messages } = req.body;
+  if (!Array.isArray(messages) || messages.length === 0) { res.status(400).json({ error: 'messages 必须为非空数组' }); return; }
+  const insert = db.prepare(`INSERT INTO chat_messages (id, target_id, role, text, source, strategy, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  const now = Date.now();
+  let count = 0;
+  db.transaction(() => {
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (!m.role || !m.text?.trim() || !['her', 'me', 'scene'].includes(m.role)) continue;
+      insert.run(uuid(), req.params.id, m.role, m.text.trim(), m.source || '历史记录', m.strategy || null, m.session_id || null, now + i);
+      count++;
+    }
+  })();
+  res.status(201).json({ count });
+});
+
 app.delete('/api/targets/:id/messages', (req: any, res: Response) => {
   if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }
   db.prepare('DELETE FROM chat_messages WHERE target_id = ?').run(req.params.id);
@@ -424,6 +442,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     let clientDisconnected = false;
     req.on('close', () => { clientDisconnected = true; });
     const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
+    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
 
     // ===== Diagnosis-first: ensure diagnosis exists =====
     let diagnosis: any = null;
@@ -491,8 +510,6 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     if (!isQuick) send('step', { step: 'analyze' });
     let raw = '';
     send('step', { step: 'generating' });
-
-    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
 
     try {
       let sentReplyCount = 0;
@@ -666,6 +683,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     let clientDisconnected = false;
     req.on('close', () => { clientDisconnected = true; });
     const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
+    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
 
     // ===== Diagnosis-first: ensure diagnosis exists =====
     let diagnosis: any = null;
@@ -718,8 +736,6 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 
     if (!isQuick) send('step', { step: 'analyze' });
     send('step', { step: 'generating' });
-
-    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
 
     let raw = '';
     let sentReplyCount = 0;

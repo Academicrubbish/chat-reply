@@ -100,12 +100,12 @@ function AppContent() {
       // Parse and import chat messages from recent_chats
       if (data.recent_chats?.trim()) {
         const { messages } = parseChatWithMeta(data.recent_chats, data.name, data.nicknameMap);
-        for (const msg of messages) {
-          await api.addMessage(target.id, {
+        if (messages.length > 0) {
+          await api.addMessagesBatch(target.id, messages.map(msg => ({
             role: msg.role,
             text: msg.text,
             source: '历史记录',
-          });
+          })));
         }
       }
 
@@ -254,14 +254,12 @@ function AppContent() {
   };
 
   const handleImportMessages = async (parsed: ParsedMessage[]) => {
-    if (!state.currentTargetId) return;
-    for (const msg of parsed) {
-      await api.addMessage(state.currentTargetId, {
-        role: msg.role,
-        text: msg.text,
-        source: msg.role === 'scene' ? '场景补充' : '历史记录',
-      });
-    }
+    if (!state.currentTargetId || parsed.length === 0) return;
+    await api.addMessagesBatch(state.currentTargetId, parsed.map(msg => ({
+      role: msg.role,
+      text: msg.text,
+      source: msg.role === 'scene' ? '场景补充' : '历史记录',
+    })));
     selectTarget(state.currentTargetId);
   };
 

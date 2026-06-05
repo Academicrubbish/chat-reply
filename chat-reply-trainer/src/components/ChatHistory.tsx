@@ -196,7 +196,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
             type="info"
             showIcon
             style={{ fontSize: 11, marginTop: 6, padding: '6px 10px' }}
-            message={
+            title={
               <span>
                 <b>微信记录导入：</b>在微信中长按消息 → 多选 → 选择最右侧邮件转发 → 进入发送页 → 长按该条邮件 → 全选复制 → 粘贴到此处。（无需发送真实邮件）
                 系统会自动识别参与者，你只需选择谁是「她」谁是「我」即可。

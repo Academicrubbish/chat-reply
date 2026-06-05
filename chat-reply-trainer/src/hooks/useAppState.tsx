@@ -2,7 +2,7 @@ import { createContext, useContext, useReducer, useRef, useEffect, useState, typ
 import type { AppState, AppAction, ChatMessage, ModelOption, GenerationStep, GenerateMode } from '../types';
 import * as api from '../services/api';
 
-const STEP_ORDER: Record<string, number> = { idle: 0, analyze: 1, generating: 2, parsing: 3, done: 4 };
+const STEP_ORDER: Record<string, number> = { idle: 0, diagnosing: 1, analyze: 2, generating: 3, parsing: 4, done: 5 };
 
 const initialState: AppState = {
   phase: 'idle',
@@ -464,10 +464,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'TRIGGER_AI', mode });
     const lastHerMsg = [...stateRef.current.messages].reverse().find(m => m.role === 'her');
 
-    // 2s timeout: transition from 'analyze' to 'generating' if no delta yet
-    const analyzeTimer = setTimeout(() => {
-      dispatch({ type: 'SET_GENERATION_STEP', step: 'generating' });
-    }, 2000);
+    // Timeout: advance step if backend is slow
+    const stepTimer = setTimeout(() => {
+      const cur = stateRef.current.generationStep;
+      const next = cur === 'diagnosing' ? 'analyze' : 'generating';
+      dispatch({ type: 'SET_GENERATION_STEP', step: next });
+    }, 3000);
 
     // Heartbeat timeout: 15s without any event = connection lost
     let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -491,16 +493,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         switch (evt.event) {
           case 'step':
             if (evt.data.step === 'auto_diagnosing') {
-              dispatch({ type: 'SET_GENERATION_STEP', step: 'analyze' });
+              dispatch({ type: 'SET_GENERATION_STEP', step: 'diagnosing' });
             }
             break;
           case 'delta':
-            clearTimeout(analyzeTimer);
+            clearTimeout(stepTimer);
             dispatch({ type: 'STREAM_DELTA', text: evt.data.text });
             break;
           case 'diagnosis_ready':
             dispatch({ type: 'SET_ACTIVE_DIAGNOSIS', diagnosis: evt.data.diagnosis });
             dispatch({ type: 'SHOW_DIAGNOSIS' });
+            if (stateRef.current.generationStep === 'diagnosing') {
+              dispatch({ type: 'SET_GENERATION_STEP', step: 'analyze' });
+            }
             break;
           case 'debug_raw':
             console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
@@ -518,7 +523,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: 'STREAM_REPLY_READY', reply: evt.data.reply, index: evt.data.index });
             break;
           case 'done':
-            clearTimeout(analyzeTimer);
+            clearTimeout(stepTimer);
             if (heartbeatTimer) clearTimeout(heartbeatTimer);
             dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
             loadSessionAiMessages(sessionId, dispatch);
@@ -530,14 +535,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }
             break;
           case 'error':
-            clearTimeout(analyzeTimer);
+            clearTimeout(stepTimer);
             if (heartbeatTimer) clearTimeout(heartbeatTimer);
             dispatch({ type: 'GENERATE_FAILURE', error: evt.data.message });
             break;
         }
       },
       (err) => {
-        clearTimeout(analyzeTimer);
+        clearTimeout(stepTimer);
         if (heartbeatTimer) clearTimeout(heartbeatTimer);
         if (err.name !== 'AbortError') {
           dispatch({ type: 'GENERATE_FAILURE', error: err.message });

@@ -19,7 +19,7 @@ const AnalysisTabs: React.FC<AnalysisTabsProps> = ({ analysis }) => {
           style={{ padding: '0 20px' }}
         />
         <div style={{ padding: '0 20px 10px' }}>
-          <Alert message="发送对方消息后将自动分析" type="info" showIcon />
+          <Alert title="发送对方消息后将自动分析" type="info" showIcon />
         </div>
       </div>
     );

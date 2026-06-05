@@ -55,6 +55,9 @@ export const getMessages = (targetId: string) =>
 export const addMessage = (targetId: string, data: Partial<ChatMessage>) =>
   request<ChatMessage>(`/targets/${targetId}/messages`, { method: 'POST', body: JSON.stringify(data) });
 
+export const addMessagesBatch = (targetId: string, messages: Array<{ role: string; text: string; source?: string }>) =>
+  request<{ count: number }>(`/targets/${targetId}/messages/batch`, { method: 'POST', body: JSON.stringify({ messages }) });
+
 export const clearMessages = (targetId: string) =>
   request<{ success: boolean }>(`/targets/${targetId}/messages`, { method: 'DELETE' });
 

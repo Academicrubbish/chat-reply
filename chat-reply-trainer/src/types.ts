@@ -67,7 +67,7 @@ export interface AnalysisData {
   favorabilityReason: string;
 }
 
-export type GenerationStep = 'idle' | 'analyze' | 'generating' | 'parsing' | 'done';
+export type GenerationStep = 'idle' | 'diagnosing' | 'analyze' | 'generating' | 'parsing' | 'done';
 
 export interface FavorabilityRecord {
   value: number;
