@@ -1,252 +1,357 @@
-# Chat Reply - AI 社交聊天训练器
+<div align="center">
 
-基于《魔鬼约会学》知识体系的 AI 社交聊天辅导系统。通过 AI 实时分析聊天上下文，提供多策略回复建议、军师诊断和复盘评估，帮助用户提升聊天沟通能力。
+# 💬 Chat Reply
 
-## 功能特性
+### 你的 AI 聊天军师
 
-### 核心功能
-- **AI 实时回复建议** — 分析对方消息的意图、情绪和信号，提供 4 种策略风格的回复选项
-- **多模式 AI 辅助** — 完整模式 / 快速模式 / 军师诊断 / 复盘评价，按需切换
-- **好感度追踪** — 每轮对话自动评估好感度变化，可视化历史趋势
-- **聊天记录导入** — 支持粘贴微信聊天记录，自动解析并导入
-- **知识体系驱动** — 内置《魔鬼约会学》完整知识库，按场景动态注入
+**聊天时大脑一片空白？AI 帮你想。**
 
-### 分析系统
-- **军师模式** — 诊断对方态度（上堆/下切/倾诉/关注）、情绪正负向、关系阶段
-- **复盘模式** — 5 维雷达图评分（诚意表达、兴趣信号、节奏掌控、情绪共鸣、策略运用）
-- **累积警告** — 自动追踪常见错误（真命天女症、诚意陷阱、过度解读等）
+不知道怎么回消息、搭讪不敢开口、聊着聊着就冷场——<br>
+把《魔鬼约会学》的方法论塞进 AI，让它在你最需要的时刻帮你一把。
 
-### 体验优化
-- **SSE 流式输出** — AI 回复实时流式展示，支持心跳检测
-- **回复版本管理** — 多次生成的回复可切换查看对比
-- **新手引导** — 首次使用自动触发交互式引导教程
-- **响应式布局** — 桌面端双面板，移动端 Tab 切换
+[![React](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
+[![Express](https://img.shields.io/badge/Express-5-000000?logo=express)](https://expressjs.com)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript)](https://www.typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 技术栈
+<p align="center">
+  <img src="screenshot-chat.png" width="45%" alt="聊天主界面">
+  <img src="screenshot-reply.png" width="45%" alt="AI 回复生成">
+</p>
+<p align="center">
+  <img src="screenshot-analysis.png" width="45%" alt="军师诊断 · 雷达图复盘">
+</p>
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | React 19 + TypeScript + Vite 8 + Ant Design 6 + Tailwind CSS 4 |
-| 后端 | Express 5 + TypeScript + SQLite (sql.js) |
-| AI | 小米 MiMo / 智谱 GLM（OpenAI 兼容接口） |
-| 知识库 | RIA++ 方法论，23 个知识单元，4 种激活模式 |
+</div>
 
-## 快速开始
+---
+
+## 目录
+
+- [😅 为什么做了这个](#-为什么做了这个)
+- [🧠 知识引擎：它的灵魂](#-知识引擎它的灵魂)
+- [✨ 功能一览](#-功能一览)
+- [🚀 5 分钟跑起来](#-5-分钟跑起来)
+- [🛠 技术栈](#-技术栈)
+- [📁 项目结构](#-项目结构)
+- [📡 API 文档](#-api-文档)
+- [🧪 测试数据](#-测试数据)
+- [📦 部署](#-部署)
+- [🤝 参与贡献](#-参与贡献)
+- [🙏 致谢](#-致谢)
+
+---
+
+## 😅 为什么做了这个
+
+你可能也有过这些时刻：
+
+> 对方发了条消息，你盯着屏幕想了 10 分钟，打了又删，删了又打，最后回了个"哈哈"。
+>
+> 鼓起勇气跟喜欢的人说句话，对方回了三个字，你瞬间不知道怎么接了。
+>
+> 明明聊得还行，突然就冷了，完全搞不懂哪里出了问题。
+
+我就是这种人。不敢搭讪，不会聊天，见到喜欢的人大脑直接宕机。
+
+后来看了阮琦老师的《魔鬼约会学》，才发现聊天不是天赋，是有方法的。但看书和实战之间隔着一条鸿沟——**你知道了理论，面对那条消息的时候，大脑还是一片空白。**
+
+所以我做了 Chat Reply：**把方法论变成一个随时在线的军师，在你聊天的每一刻，实时帮你分析、建议、甚至直接帮你想好怎么回。**
+
+---
+
+## 🧠 知识引擎：它的灵魂
+
+Chat Reply 不是随便调个 AI 让它帮你回消息。它的核心是一套**结构化的知识引擎**。
+
+基于阮琦老师（网名"魔鬼咨询师"，北大心理学出身，潜心研究男女交往十余年）在[《魔鬼约会学》](https://book.douban.com/subject/25839107/)中提出的方法论，我们把整本书的精华拆成了 **23 个知识单元**。AI 在你每次聊天时，会实时匹配相关知识并注入分析。
+
+**它能教会你什么：**
+
+**读懂对方的真实态度** — 她说"嗯嗯"和"然后呢"完全是两码事。上堆是敷衍，下切是兴趣。不用猜，看说话方式就知道。
+
+**知道什么时候该说什么** — 初期接触要降低压力，聊天升温要制造趣味，暧昧期才能试着升级。搞错阶段，再好的话术也白搭。
+
+**避开你自己意识不到的坑** — 明明对她很好却不领情？那可能是"诚意陷阱"，感动 ≠ 心动。把她想得太完美觉得非她不可？那是"真命天女症"。系统会在聊天过程中自动检测并提醒你。
+
+<details>
+<summary>📋 23 个知识单元完整一览</summary>
+
+| 类别 | 编号 | 知识点 | 一句话说清 |
+|------|------|--------|-----------|
+| 🔍 **框架** | F01 | 上堆下切模型 | 区分敷衍和兴趣的利器 |
+| | F02 | 四大法则 | 判断关系状态的罗盘 |
+| | F03 | 态度判断框架 | 回应→倾诉→关注→依顺，你在哪一级 |
+| | F04 | 关系阶段模型 | 不同阶段用不同策略，别搞混了 |
+| | F05 | 信号三分类 | 一条消息是正面、负面还是模糊，决定了你怎么回 |
+| | F06 | 好感度评估 | 追踪关系变化，不做盲目的人 |
+| 🎯 **原则** | P01 | 诚意法则 | 真诚 ≠ 无脑付出 |
+| | P02 | 关注反应法则 | 别看她说什么，看她愿不愿意继续聊 |
+| | P03 | 被拒绝的应对 | 被拒不可怕，死缠才可怕 |
+| | P04 | 开场原则 | 自然大于巧妙，低压力大于高冲击 |
+| | P05 | 扩大冲突法则 | 有趣的小摩擦比无聊的和谐更吸引人 |
+| | P06 | 安全回复兜底 | 不确定说什么时，表达自己而不是评价对方 |
+| | P07 | 升级判断 | 正面回应 ×2 才能升级，缺一个都不行 |
+| | P08 | 模糊信号处理 | 不确定时按中性处理，别脑补 |
+| 🎪 **场景** | S01 | 搭讪开场 | 3 秒法则 + 低压力开场白 |
+| | S02 | 微信聊天 | 文字节奏、话题选择、何时邀约 |
+| | S03 | 邀约时机 | 降低门槛法、模糊→具体邀约 |
+| | S04 | 暧昧升级 | 好感信号判断、升级节奏 |
+| | S05 | 被拒绝后 | 情绪管理、关系修复、何时放手 |
+| ⚠️ **概念** | C01 | 真命天女症 | 把她想得太完美，反而失去自我 |
+| | C02 | 诚意陷阱 | "对她好"≠ 吸引她 |
+| | C03 | 大姧升级 | 还没到那一步就表白，功亏一篑 |
+| | C04 | 因果链放大 | 她没回消息 → 她不喜欢我 → 我是废物（打住！） |
+
+</details>
+
+这些知识不是死的。AI 会根据聊天内容、阶段、信号类型，**动态匹配最相关的知识单元**注入分析。不同模式激活不同的知识组合：完整模式用全量知识做深度分析，快速模式精简为查表格式秒回，军师模式聚焦诊断，复盘模式聚焦纠错。
+
+---
+
+## ✨ 功能一览
+
+<table>
+<tr>
+<td width="50%">
+
+### 🤖 AI 实时回复
+输入对方的消息，AI 会：
+- 分析信号类型（正面 / 负面 / 模糊）
+- 判断关系阶段和好感度
+- 结合知识库推荐策略
+- 生成 4 种不同风格的回复
+
+</td>
+<td width="50%">
+
+### 🎯 军师诊断
+不生成回复，只做分析：
+- 对方的态度等级和语言模式
+- 情绪类型和正负向
+- 是否到了升级时机
+- 下一步具体行动方案
+- 自动检测心理陷阱
+
+</td>
+</tr>
+<tr>
+<td>
+
+### 📈 复盘学习
+聊完之后回头看看：
+- 五维雷达图评分
+- 哪些回合处理得好 / 犯了错
+- 你最需要补强什么知识
+
+</td>
+<td>
+
+### 💾 实用工具
+- 📋 粘贴微信聊天记录自动解析导入
+- 📊 好感度变化趋势图
+- 🔄 回复版本管理（多次生成可对比）
+- 📱 移动端适配
+- 🎓 新手引导教程
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 5 分钟跑起来
 
 ### 环境要求
 
 - Node.js >= 18
 - npm >= 9
+- 一个[智谱 API Key](https://open.bigmodel.cn)（免费额度即可）
 
-### 1. 克隆项目
+### 安装
 
 ```bash
 git clone https://github.com/Academicrubbish/chat-reply.git
 cd chat-reply
-```
 
-### 2. 启动后端
-
-```bash
+# 后端
 cd chat-reply-server
-cp .env.example .env   # 复制环境变量模板
-npm install
-npm run dev
-```
+cp .env.example .env
+npm install && npm run dev
 
-### 3. 启动前端
-
-```bash
+# 前端（新终端）
 cd chat-reply-trainer
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-### 4. 配置 AI 服务
+### 配置
 
 编辑 `chat-reply-server/.env`，填入 API Key：
 
 ```env
-# 小米 MiMo（推荐）
-MIMO_API_KEY=你的API密钥
-MIMO_BASE_URL=https://api.xiaomimimo.com/v1
-MIMO_MODEL=mimo-v2.5-pro
-
-# 或智谱 GLM
-# ZHIPU_API_KEY=你的API密钥
-# ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
-# ZHIPU_MODEL=glm-5.1
+# 智谱 GLM（推荐，有免费额度）
+ZHIPU_API_KEY=你的API密钥
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+ZHIPU_MODEL=glm-5.1
 ```
 
-> 获取小米 MiMo API Key：[platform.xiaomimimo.com](https://platform.xiaomimimo.com)
+> 获取 API Key：[open.bigmodel.cn](https://open.bigmodel.cn) · 也支持小米 MiMo 等其他 OpenAI 兼容模型
 
-## 项目结构
+### 试试效果
+
+```bash
+# 导入 8 个测试场景（后端运行中执行）
+node test-data/seed.js
+```
+
+打开 http://localhost:5173 → 注册 → 选择聊天对象 → 输入消息 → 点「AI 辅助」
+
+---
+
+## 🛠 技术栈
+
+| 层级 | 技术 | 亮点 |
+|------|------|------|
+| 前端 | React 19 + Vite 8 + Ant Design 6 + Tailwind CSS 4 | SSE 流式渲染 + 响应式 |
+| 后端 | Express 5 + TypeScript + SQLite (sql.js) | 零配置数据库 |
+| AI | 智谱 GLM / 小米 MiMo | OpenAI 兼容，多模型切换 |
+| 知识引擎 | RIA++ 方法论 · 23 知识单元 | 静态/动态 Prompt 拆分 + 动态匹配注入 |
+
+---
+
+## 📁 项目结构
 
 ```
 chat-reply/
-├── chat-reply-server/              # 后端服务
-│   ├── src/
-│   │   ├── index.ts               # Express 主入口 + API 路由
-│   │   ├── db.ts                  # SQLite 数据库初始化与迁移
-│   │   ├── llm.ts                 # LLM 调用封装（多模型 + 流式）
-│   │   ├── prompt.ts              # 提示词工程（静态/动态拆分 + 知识注入）
-│   │   ├── knowledge/             # 知识库系统
-│   │   │   ├── index.ts           # 知识单元注册与查询
-│   │   │   ├── types.ts           # RIA++ 知识单元类型定义
-│   │   │   ├── frameworks.ts      # 诊断框架（上堆下切等）
-│   │   │   ├── principles.ts      # 核心原则（诚意法则等）
-│   │   │   ├── scenarios.ts       # 场景策略（搭讪/微信等）
-│   │   │   ├── concepts.ts        # 核心概念（真命天女症等）
-│   │   │   └── mode-mapping.ts    # 模式-知识映射关系
-│   │   ├── middleware/
-│   │   │   └── auth.ts            # JWT 认证中间件
-│   │   └── routes/
-│   │       └── knowledge.ts       # 知识库 API 路由
-│   └── .env                       # 环境配置（不入库）
+├── chat-reply-server/
+│   └── src/
+│       ├── knowledge/          🧠 知识库（核心）
+│       │   ├── frameworks.ts   # F01-F06 诊断框架
+│       │   ├── principles.ts   # P01-P08 核心原则
+│       │   ├── scenarios.ts    # S01-S05 场景策略
+│       │   ├── concepts.ts     # C01-C04 心理概念
+│       │   └── mode-mapping.ts # 模式→知识映射
+│       ├── prompt.ts           # 提示词工程（静态/动态拆分）
+│       ├── llm.ts              # 多模型 LLM 调用
+│       └── index.ts            # API 路由
 │
-├── chat-reply-trainer/             # 前端应用
-│   ├── src/
-│   │   ├── App.tsx                # 主应用（认证状态机 + 布局）
-│   │   ├── hooks/
-│   │   │   └── useAppState.tsx    # 全局状态管理（Context + Reducer）
-│   │   ├── components/
-│   │   │   ├── Toolbar.tsx        # 工具栏（模式切换 + 会话管理）
-│   │   │   ├── RoundTimeline.tsx  # 回复卡片时间线
-│   │   │   ├── ChatHistory.tsx    # 聊天记录面板
-│   │   │   ├── ChatBubble.tsx     # 消息气泡
-│   │   │   ├── AnalysisDrawer.tsx # 军师/复盘分析抽屉
-│   │   │   ├── MessageInput.tsx   # 消息输入框
-│   │   │   └── ...                # 其他 22 个组件
-│   │   ├── services/
-│   │   │   └── api.ts             # API 服务层（REST + SSE）
-│   │   ├── types.ts               # TypeScript 类型定义
-│   │   └── utils/
-│   │       ├── parseChat.ts       # 聊天记录解析器
-│   │       └── tourGuide.ts       # 新手引导（driver.js）
-│   └── vite.config.ts             # Vite 配置（含 API 代理）
+├── chat-reply-trainer/
+│   └── src/
+│       ├── components/         # 20+ React 组件
+│       ├── hooks/useAppState.tsx
+│       └── services/api.ts     # REST + SSE
 │
-└── README.md
+└── test-data/                  # 8 个测试场景
 ```
 
-## 数据模型
+---
+
+## 📡 API 文档
+
+### 核心接口（SSE 流式）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/sessions/:id/generate` | AI 生成回复 |
+| POST | `/api/sessions/:id/regenerate` | 换一批回复 |
+| POST | `/api/sessions/:id/analyze` | 军师诊断 / 复盘 |
+| POST | `/api/sessions/:id/select-reply` | 选择一条回复 |
+| POST | `/api/sessions/:id/custom-reply` | 自定义回复 |
+
+### SSE 事件流
 
 ```
-users
-  └── chat_targets (user_id)
-        ├── chat_messages (target_id)
-        ├── ai_sessions (target_id)
-        │     ├── ai_messages (session_id)
-        │     └── reply_selections (session_id)
-        ├── chat_evaluations (target_id)
-        └── chat_diagnoses (target_id)
-              └── user_warnings (累积警告)
+step → analyze / generating / parsing → delta → analysis → plan → replies → done
 ```
 
-## API 文档
+<details>
+<summary>📋 完整 API 列表</summary>
 
-### 认证
+**认证**
+`GET /api/auth/status` · `POST /api/auth/setup` · `POST /api/auth/register` · `POST /api/auth/login`
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/auth/status` | 检查系统是否已初始化 |
-| POST | `/api/auth/setup` | 首次初始化管理员 |
-| POST | `/api/auth/register` | 用户注册 |
-| POST | `/api/auth/login` | 用户登录 |
-| POST | `/api/auth/logout` | 用户登出 |
+**聊天对象 & 消息**
+`GET/POST /api/targets` · `GET/PUT/DELETE /api/targets/:id` · `GET/POST /api/targets/:id/messages` · `PUT/DELETE /api/messages/:id`
 
-### 聊天对象
+**分析**
+`GET /api/targets/:id/analyses` · `GET /api/targets/:id/diagnoses` · `GET /api/targets/:id/warnings`
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/targets` | 获取聊天对象列表 |
-| POST | `/api/targets` | 创建聊天对象 |
-| GET | `/api/targets/:id` | 获取单个对象详情 |
-| PUT | `/api/targets/:id` | 更新聊天对象 |
-| DELETE | `/api/targets/:id` | 删除聊天对象 |
+</details>
 
-### 消息
+---
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/targets/:id/messages` | 获取消息列表 |
-| POST | `/api/targets/:id/messages` | 添加消息 |
-| PUT | `/api/messages/:id` | 编辑消息 |
-| DELETE | `/api/messages/:id` | 删除消息 |
-| DELETE | `/api/targets/:id/messages` | 清空所有消息 |
+## 🧪 测试数据
 
-### AI 会话
+8 个覆盖不同阶段和信号类型的场景，导入即可体验：
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/targets/:id/sessions` | 获取会话列表 |
-| POST | `/api/targets/:id/sessions` | 创建新会话 |
-| GET | `/api/sessions/:id/messages` | 获取会话消息 |
-| DELETE | `/api/sessions/:id` | 删除会话 |
+| 场景 | 阶段 | 信号 | 你会学到 |
+|------|------|------|---------|
+| 初次破冰 | 初期接触 | 正面 | 怎么识别开场信号 |
+| 上堆冷淡 | 初期接触 | 负面 | 什么是"上堆"敷衍 |
+| 聊天升温 | 聊天升温 | 正面冲突 | 怎么制造有趣的互动 |
+| 暧昧升级 | 暧昧期 | 正面冲突 | 怎么判断升级时机 |
+| 模糊信号 | 聊天升温 | 模糊 | 不确定时怎么处理 |
+| 被拒绝 | 聊天升温 | 负面 | 被拒后怎么办 |
+| 诚意陷阱 | 混合 | 负面 | 识别"感动≠心动" |
+| 快速邀约 | 聊天升温 | 正面 | 什么时候可以约出来 |
 
-### AI 生成（SSE 流式）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/sessions/:id/generate` | AI 生成回复（SSE） |
-| POST | `/api/sessions/:id/regenerate` | 重新生成（SSE） |
-| POST | `/api/sessions/:id/select-reply` | 选择 AI 建议的回复 |
-| POST | `/api/sessions/:id/custom-reply` | 发送自定义回复 |
-
-### 分析
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/sessions/:id/analyze` | 军师诊断 / 复盘评价（SSE） |
-| GET | `/api/targets/:id/analyses` | 获取分析历史 |
-| GET | `/api/targets/:id/evaluations` | 获取评估记录 |
-| GET | `/api/targets/:id/diagnoses` | 获取诊断记录 |
-| GET | `/api/targets/:id/warnings` | 获取累积警告 |
-
-### SSE 事件类型
-
-```
-generate / regenerate 接口返回的事件流：
-
-step        → 处理步骤（analyze / generating / parsing）
-heartbeat   → 心跳检测（每 2 秒）
-delta       → 流式文本片段
-analysis    → 分析结果（信号、策略、好感度）
-plan        → 策略计划（目标、下一步）
-replies     → 回复选项列表
-reply_ready → 快速模式下逐条返回
-done        → 完成（含 token 用量）
-error       → 错误信息
+```bash
+node test-data/seed.js [--user tester --pass test1234]
 ```
 
-## AI 模式说明
+---
 
-| 模式 | 说明 | 适用场景 |
-|------|------|---------|
-| **full** | 完整分析 + 4 种策略回复 | 日常聊天辅导 |
-| **quick** | 查表式快速回复 | 需要快速回应时 |
-| **advisor** | 只分析不回复，给出诊断和建议 | 想了解对方心理 |
-| **review** | 回复打分 + 5 维雷达图 + 知识缺口 | 复盘学习提升 |
+## 📦 部署
 
-## 使用指南
+```bash
+# 构建
+cd chat-reply-server && npm run build
+cd chat-reply-trainer && npm run build
 
-1. **首次使用** — 注册账号，创建第一个聊天对象
-2. **输入消息** — 在右侧面板输入对方发送的消息，或导入聊天记录
-3. **AI 辅助** — 点击「AI 辅助」按钮，选择模式，获取智能建议
-4. **选择回复** — 从多种策略回复中选择一个，或自定义回复
-5. **军师诊断** — 点击「军师」查看对方的情绪分析和关系阶段
-6. **复盘学习** — 对话结束后点击「复盘」，获取评分和改进建议
+# 后端
+npm install --omit=dev && node dist/index.js
 
-## 知识库体系
+# 前端（Nginx）
+# location / { root /app/frontend-dist; try_files $uri /index.html; }
+# location /api { proxy_pass http://127.0.0.1:3001; }
+```
 
-基于 RIA++ 方法论，包含 23 个知识单元：
+---
 
-- **框架**（F01-F06）— 上堆下切语言模式、态度判断框架等
-- **原则**（P01-P08）— 诚意法则、关注反应、魔趣法则等
-- **场景**（S01-S05）— 搭讪开场、微信沟通、约会推进等
-- **概念**（C01-C04）— 真命天女症、诚意陷阱、大姧升级等
+## 🤝 参与贡献
 
-知识单元根据聊天内容动态匹配注入，不同 AI 模式激活不同的知识组合。
+欢迎各种形式的贡献！
 
-## 许可证
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 提交 Pull Request
 
-MIT License
+**可以贡献的方向：**
+- 🧠 新增知识单元（社交场景、心理概念等）
+- 🌐 国际化支持（英文 UI / 双语 README）
+- 🤖 接入更多 LLM 模型
+- 📱 改进移动端体验
+- 🐛 修复 Bug / 完善文档
+
+---
+
+## 🙏 致谢
+
+- **阮琦**（魔鬼咨询师）— [《魔鬼约会学》](https://book.douban.com/subject/25839107/)及魔鬼三部曲，这套方法论改变了很多人对社交的认知
+- 本项目知识库基于阮琦老师的方法论构建，用 AI 技术让这些知识在你最需要的时刻帮你一把
+
+## 📄 许可证
+
+[MIT License](LICENSE)
+
+---
+
+<div align="center">
+
+*Chat Reply — 别再盯着聊天框发呆了*
+
+**[⬆ 回到顶部](#-chat-reply)**
+
+</div>
