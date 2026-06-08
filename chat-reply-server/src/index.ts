@@ -442,7 +442,10 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     let clientDisconnected = false;
     req.on('close', () => { clientDisconnected = true; });
     const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
-    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
+    // Heartbeat as SSE comment (not event) to keep connection alive during auto-diagnosis
+    const heartbeatTimer = setInterval(() => {
+      if (!clientDisconnected) { try { res.write('event: hb\ndata: {}\n\n'); } catch {} }
+    }, 30000);
 
     // ===== Diagnosis-first: ensure diagnosis exists =====
     let diagnosis: any = null;
@@ -453,6 +456,10 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
           ...d,
           warnings: JSON.parse(d.warnings_json || '[]'),
           knowledgeIds: JSON.parse(d.knowledge_ids || '[]'),
+          // Load attraction from chat_targets (not stored on chat_diagnoses)
+          attraction: target.attraction_score != null
+            ? { score: target.attraction_score, reason: '' }
+            : undefined,
         };
       }
     }
@@ -511,6 +518,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     let raw = '';
     send('step', { step: 'generating' });
 
+    clearInterval(heartbeatTimer);
     try {
       let sentReplyCount = 0;
       for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
@@ -529,9 +537,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
           }
         }
       }
-    } finally {
-      clearInterval(heartbeatTimer);
-    }
+    } catch { /* stream error */ }
 
     if (!isQuick) send('step', { step: 'parsing' });
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
@@ -560,6 +566,18 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       send('replies', parsed.replies || []);
     }
 
+    // Extract attraction score from full mode generate LLM response
+    let attractionResult: { score: number; reason: string } | null = null;
+    if (!isQuick && parsed.attraction) {
+      if (typeof parsed.attraction.score === 'number') {
+        attractionResult = {
+          score: Math.max(0, Math.min(100, Math.round(parsed.attraction.score))),
+          reason: parsed.attraction.reason || '',
+        };
+        db.prepare('UPDATE chat_targets SET attraction_score = ? WHERE id = ?').run(attractionResult.score, target.id);
+      }
+    }
+
     const maxTokens = 8000;
     const contextUsage = { estimatedTokens, maxTokens, percentage: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100) };
 
@@ -584,7 +602,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       }
     })();
 
-    send('done', { contextUsage, roundId, version: 1 });
+    send('done', { contextUsage, roundId, version: 1, attraction: attractionResult || undefined });
     res.end();
   } catch (err: any) {
     console.error('Generate error:', err);
@@ -683,14 +701,23 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     let clientDisconnected = false;
     req.on('close', () => { clientDisconnected = true; });
     const send = (event: string, data: any) => { if (!clientDisconnected) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} } };
-    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
+    const heartbeatTimer = setInterval(() => {
+      if (!clientDisconnected) { try { res.write('event: hb\ndata: {}\n\n'); } catch {} }
+    }, 30000);
 
     // ===== Diagnosis-first: ensure diagnosis exists =====
     let diagnosis: any = null;
     if (target.active_diagnosis_id) {
       const d = db.prepare('SELECT * FROM chat_diagnoses WHERE id = ?').get(target.active_diagnosis_id) as any;
       if (d) {
-        diagnosis = { ...d, warnings: JSON.parse(d.warnings_json || '[]'), knowledgeIds: JSON.parse(d.knowledge_ids || '[]') };
+        diagnosis = {
+          ...d,
+          warnings: JSON.parse(d.warnings_json || '[]'),
+          knowledgeIds: JSON.parse(d.knowledge_ids || '[]'),
+          attraction: target.attraction_score != null
+            ? { score: target.attraction_score, reason: '' }
+            : undefined,
+        };
       }
     }
 
@@ -737,6 +764,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     if (!isQuick) send('step', { step: 'analyze' });
     send('step', { step: 'generating' });
 
+    clearInterval(heartbeatTimer);
     let raw = '';
     let sentReplyCount = 0;
     try {
@@ -756,9 +784,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
           }
         }
       }
-    } finally {
-      clearInterval(heartbeatTimer);
-    }
+    } catch { /* stream error */ }
 
     if (!isQuick) send('step', { step: 'parsing' });
 
@@ -795,7 +821,19 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
         .run(estimatedTokens, diagnosis?.id || null, session.id);
     }
 
-    send('done', { contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) }, roundId, version: nextVersion });
+    // Extract attraction score from regenerate full mode LLM response
+    let regenAttrResult: { score: number; reason: string } | null = null;
+    if (!isQuick && parsed.attraction) {
+      if (typeof parsed.attraction.score === 'number') {
+        regenAttrResult = {
+          score: Math.max(0, Math.min(100, Math.round(parsed.attraction.score))),
+          reason: parsed.attraction.reason || '',
+        };
+        db.prepare('UPDATE chat_targets SET attraction_score = ? WHERE id = ?').run(regenAttrResult.score, target.id);
+      }
+    }
+
+    send('done', { contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) }, roundId, version: nextVersion, attraction: regenAttrResult || undefined });
     res.end();
   } catch (err: any) {
     console.error('Regenerate error:', err);
@@ -833,16 +871,13 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     ];
 
     let raw = '';
-    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
     try {
       for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
       }
-    } finally {
-      clearInterval(heartbeatTimer);
-    }
+    } catch { /* stream error */ }
 
     send('step', { step: 'parsing' });
     let parsed = parseJsonSafely(raw);
@@ -908,6 +943,14 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
       }
     }
 
+    // Save attraction score
+    const attractionScore = typeof parsed.attraction?.score === 'number'
+      ? Math.max(0, Math.min(100, Math.round(parsed.attraction.score)))
+      : null;
+    if (attractionScore !== null) {
+      db.prepare('UPDATE chat_targets SET attraction_score = ? WHERE id = ?').run(attractionScore, target.id);
+    }
+
     const diagnosis = {
       id: diagId, target_id: target.id,
       attitude_level: parsed.attitude?.level || '',
@@ -922,6 +965,7 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
       strategy: parsed.nextStep?.strategy || '',
       knowledgeIds: diag.knowledgeIds || [],
       created_at: now,
+      attraction: attractionScore !== null ? { score: attractionScore, reason: parsed.attraction?.reason || '' } : undefined,
     };
 
     send('diagnosis_done', { diagnosis });
@@ -1025,6 +1069,14 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
 
   db.prepare('UPDATE chat_targets SET active_diagnosis_id = ? WHERE id = ?').run(diagId, target.id);
 
+  // Save attraction score
+  const attractionScore = typeof parsed.attraction?.score === 'number'
+    ? Math.max(0, Math.min(100, Math.round(parsed.attraction.score)))
+    : null;
+  if (attractionScore !== null) {
+    db.prepare('UPDATE chat_targets SET attraction_score = ? WHERE id = ?').run(attractionScore, target.id);
+  }
+
   // Accumulate warnings
   for (const w of (diag.warnings || [])) {
     let wt = 'other';
@@ -1055,6 +1107,7 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
     strategy: parsed.nextStep?.strategy || '',
     knowledgeIds: diag.knowledgeIds || [],
     created_at: now,
+    attraction: attractionScore !== null ? { score: attractionScore, reason: parsed.attraction?.reason || '' } : undefined,
   };
 }
 
@@ -1097,16 +1150,13 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
 
     // Stream LLM response
     let raw = '';
-    const heartbeatTimer = setInterval(() => { send('heartbeat', { ts: Date.now() }); }, 2000);
     try {
       for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
       }
-    } finally {
-      clearInterval(heartbeatTimer);
-    }
+    } catch { /* stream error */ }
 
     // Parse response
     send('step', { step: 'parsing' });

@@ -207,7 +207,7 @@ export function buildFullDynamicContextOptimized(params: PromptParams): string {
 ${feedback}# 输出要求
 
 分析对方最新消息，返回JSON：
-{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","attraction":0-100,"knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
 
 要求：
 - 生成3-4条回复，风格各异，至少1条安全回复
@@ -291,7 +291,7 @@ ${context}
 ${feedback}# 输出要求
 
 根据诊断方案，针对对方最新消息生成回复。只返回JSON：
-{"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由（1句话说明为什么符合诊断方向）","knowledgeId":"对应的知识单元ID"}]}
+{"attraction":{"score":0-100,"reason":"心动值变化原因（1句）"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由（1句话说明为什么符合诊断方向）","knowledgeId":"对应的知识单元ID"}]}
 
 要求：
 - 生成3-4条回复，风格各异，至少1条安全回复
@@ -300,6 +300,8 @@ ${feedback}# 输出要求
 - 每条标注策略名、理由和对应的知识单元ID
 - 遵守语气偏好和话题禁区
 - 基于历史反馈调整策略权重
+- attraction.score 基于对方最新消息的态度变化、主动性、话题深度综合评估
+- attraction.reason 用1句话说明当前分数或变化依据
 - 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 
   return [
@@ -481,7 +483,7 @@ ${feedback}
 # 输出要求
 
 分析对方最新消息，返回JSON：
-{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","attraction":0-100,"knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
 
 要求：
 - 生成3-4条回复，风格各异，至少1条安全回复
@@ -510,7 +512,7 @@ export function buildFullDynamicContext(params: PromptParams): string {
 ${feedback}# 输出要求
 
 分析对方最新消息，返回JSON：
-{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
+{"analysis":{"stage":"关系阶段（初期接触/聊天升温/暧昧期/约会恋爱期）","signal":"信号类型（正面冲突/正面无冲突/模糊/负面）","strategy":"推荐策略","signalText":"分析对方语气和隐含意思（2-3句）","emotions":["情绪标签1","情绪标签2"],"tip":"一句实用小建议","favorability":0-100,"favorabilityReason":"好感度判断依据（1-2句）","attraction":0-100,"knowledgeIds":["用到的知识单元ID，如F01、F03"]},"plan":{"goal":"当前对话策略目标","nextStep":"下一步具体建议"},"replies":[{"id":1,"strategy":"策略名","text":"回复文本","reason":"推荐理由","knowledgeId":"对应的知识单元ID"}]}
 
 要求：
 - 生成3-4条回复，风格各异，至少1条安全回复
@@ -644,13 +646,14 @@ ${chatHistory || '（暂无聊天记录）'}
 
 # 输出要求
 返回JSON：
-{"attitude":{"level":"好感级别（回应/倾诉/关注/依顺）","languagePattern":"语言模式分析（上堆/下切比例+具体证据）","detail":"态度分析2-3句","evidence":"引用聊天记录中的具体内容作为依据"},"emotion":{"type":"情绪类型","valence":"正向/负向/中性","detail":"情绪分析2-3句","evidence":"引用具体证据"},"thought":{"intention":"对方可能的意图（标注置信度：高/中/低）","expectation":"对方可能期待什么","detail":"深入分析2-3句"},"diagnosis":{"warnings":["警告1（如诚意陷阱/真命天女症倾向/因果链放大情绪等）"],"stage":"当前关系层级","upgradeReady":true或false,"upgradeReason":"升级条件是否满足的判断依据","knowledgeIds":["分析中用到的知识单元ID"]},"nextStep":{"action":"建议的下一步具体行动","strategy":"推荐策略及对应知识单元ID","keyPoints":["要点1","要点2","要点3"],"warnings":["注意事项1","注意事项2"]}}
+{"attitude":{"level":"好感级别（回应/倾诉/关注/依顺）","languagePattern":"语言模式分析（上堆/下切比例+具体证据）","detail":"态度分析2-3句","evidence":"引用聊天记录中的具体内容作为依据"},"emotion":{"type":"情绪类型","valence":"正向/负向/中性","detail":"情绪分析2-3句","evidence":"引用具体证据"},"thought":{"intention":"对方可能的意图（标注置信度：高/中/低）","expectation":"对方可能期待什么","detail":"深入分析2-3句"},"attraction":{"score":0-100,"reason":"心动值判断依据（1-2句）"},"diagnosis":{"warnings":["警告1（如诚意陷阱/真命天女症倾向/因果链放大情绪等）"],"stage":"当前关系层级","upgradeReady":true或false,"upgradeReason":"升级条件是否满足的判断依据","knowledgeIds":["分析中用到的知识单元ID"]},"nextStep":{"action":"建议的下一步具体行动","strategy":"推荐策略及对应知识单元ID","keyPoints":["要点1","要点2","要点3"],"warnings":["注意事项1","注意事项2"]}}
 
 要求：
 - evidence必须引用聊天记录中的具体内容
+- attraction.score是对方对你的心动程度（0=完全无感，100=非常喜欢），综合评估对方的态度层级、情感投入、主动性、话题深度、回复速度与质量等维度
 - nextStep要具体可执行，不要泛泛而谈
 - warnings要指出用户可能犯的错误
-- 如果聊天记录太少，在thought.detail中说明信息不足
+- 如果聊天记录太少，在thought.detail中说明信息不足，attraction.score给中间值50并说明数据不足
 - 只返回纯JSON，不要反引号markdown包裹，不要额外文字说明`;
 }
 

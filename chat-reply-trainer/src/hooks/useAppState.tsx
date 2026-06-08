@@ -23,6 +23,7 @@ const initialState: AppState = {
   modalOpen: false,
   editingTarget: null,
   favorabilityHistory: [],
+  attraction: null,
   replyVersions: [],
   activeVersionIndex: 0,
   replySelections: [],
@@ -61,6 +62,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         generationStep: 'idle',
         streamingText: '',
         favorabilityHistory: [],
+        attraction: state.targets.find(t => t.id === action.targetId)?.attraction_score != null
+          ? { score: state.targets.find(t => t.id === action.targetId)!.attraction_score!, reason: '' }
+          : null,
         replyVersions: [],
         activeVersionIndex: 0,
         activeDiagnosis: null,
@@ -308,7 +312,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'TRIGGER_DIAGNOSE':
       return { ...state, isDiagnosing: true, diagnosisStep: 'analyzing' as const, streamingText: '', error: null };
     case 'DIAGNOSIS_SUCCESS':
-      return { ...state, isDiagnosing: false, diagnosisStep: 'done' as const, activeDiagnosis: action.diagnosis };
+      return { ...state, isDiagnosing: false, diagnosisStep: 'done' as const, activeDiagnosis: action.diagnosis, attraction: action.diagnosis?.attraction || state.attraction };
     case 'DIAGNOSIS_FAILURE':
       return { ...state, isDiagnosing: false, diagnosisStep: 'idle' as const, error: action.error, errorTimestamp: Date.now() };
     case 'DIAGNOSIS_STEP':
@@ -321,6 +325,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, diagnosisJustGenerated: true };
     case 'DISMISS_DIAGNOSIS':
       return { ...state, diagnosisJustGenerated: false };
+    case 'SET_ATTRACTION':
+      return { ...state, attraction: action.attraction };
     default:
       return state;
   }

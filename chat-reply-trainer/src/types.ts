@@ -3,6 +3,7 @@ export interface ChatTarget {
   name: string;
   meet_scene: string;
   persona: string;
+  attraction_score?: number | null;
   hobbies: string;
   recent_chats: string;
   tone_level: 'aggressive' | 'moderate' | 'conservative';
@@ -137,6 +138,7 @@ export interface TargetDiagnosis {
   action: string;
   strategy: string;
   knowledgeIds: string[];
+  attraction?: { score: number; reason: string };
   created_at: number;
 }
 
@@ -197,6 +199,7 @@ export interface AppState {
   modalOpen: boolean;
   editingTarget: ChatTarget | null;
   favorabilityHistory: FavorabilityRecord[];
+  attraction: { score: number; reason: string } | null;
   replyVersions: ReplyVersion[];
   activeVersionIndex: number;
   replySelections: ReplySelection[];
@@ -258,4 +261,5 @@ export type AppAction =
   | { type: 'CLEAR_DIAGNOSIS' }
   | { type: 'SET_DIAGNOSIS_HISTORY'; history: TargetDiagnosis[] }
   | { type: 'SHOW_DIAGNOSIS' }
-  | { type: 'DISMISS_DIAGNOSIS' };
+  | { type: 'DISMISS_DIAGNOSIS' }
+  | { type: 'SET_ATTRACTION'; attraction: { score: number; reason: string } | null };

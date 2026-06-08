@@ -423,6 +423,11 @@ export async function initDb(): Promise<void> {
   dbReady = true;
 }
 
+// Migrate: add attraction_score to chat_targets
+try {
+  dbWrapper.exec(`ALTER TABLE chat_targets ADD COLUMN attraction_score INTEGER DEFAULT NULL`);
+} catch {}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }

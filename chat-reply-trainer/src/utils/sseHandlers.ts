@@ -31,7 +31,7 @@ export function createSSEHandlers(
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = setTimeout(() => {
       dispatch({ type: 'GENERATE_FAILURE', error: '连接超时，请重试' });
-    }, 15000);
+    }, 45000);
   };
   resetHeartbeat();
 
@@ -42,7 +42,7 @@ export function createSSEHandlers(
 
   const onEvent: SSEEventHandler = (evt) => {
     resetHeartbeat();
-    if (evt.event !== 'heartbeat' && evt.event !== 'delta') {
+    if (evt.event !== 'hb' && evt.event !== 'delta') {
       console.log(`[${tag}]`, evt.event, evt.data);
     }
     switch (evt.event) {
@@ -63,6 +63,9 @@ export function createSSEHandlers(
         if (stateRef.current.generationStep === 'diagnosing') {
           dispatch({ type: 'SET_GENERATION_STEP', step: 'analyze' });
         }
+        if (evt.data.diagnosis?.attraction) {
+          dispatch({ type: 'SET_ATTRACTION', attraction: evt.data.diagnosis.attraction });
+        }
         break;
       case 'debug_raw':
         console.error('[LLM Parse Failed] Source:', evt.data.source, 'Length:', evt.data.rawLength, '\nRaw output (first 800 chars):\n', evt.data.rawPreview);
@@ -82,6 +85,9 @@ export function createSSEHandlers(
       case 'done':
         cleanup();
         dispatch({ type: 'STREAM_DONE', contextUsage: evt.data.contextUsage, roundId: evt.data.roundId });
+        if (evt.data.attraction) {
+          dispatch({ type: 'SET_ATTRACTION', attraction: evt.data.attraction });
+        }
         onDone?.(evt.data);
         break;
       case 'error':

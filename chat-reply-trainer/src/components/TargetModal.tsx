@@ -138,13 +138,13 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
               <Input />
             </Form.Item>
             <Form.Item label="兴趣爱好" name="hobbies">
-              <Input />
+              <Input.TextArea rows={3} maxLength={1000} showCount />
             </Form.Item>
             <Form.Item label="认识场景" name="meet_scene">
-              <Input.TextArea rows={3} />
+              <Input.TextArea rows={3} maxLength={1000} showCount />
             </Form.Item>
             <Form.Item label="人设描述" name="persona">
-              <Input.TextArea rows={3} />
+              <Input.TextArea rows={3} maxLength={1000} showCount />
             </Form.Item>
             <Form.Item label="语气风格" name="tone_level">
               <Radio.Group>
@@ -181,7 +181,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
             ) : (
               <>
                 <Form.Item label="最近聊天内容" name="recent_chats">
-                  <Input.TextArea rows={8} placeholder={"她：你在干嘛\n我：在加班呢\n场景：过了两天没联系\n她：最近忙吗"} />
+                  <Input.TextArea rows={8} maxLength={30000} showCount placeholder={"她：你在干嘛\n我：在加班呢\n场景：过了两天没联系\n她：最近忙吗"} />
                 </Form.Item>
                 <div style={{ fontSize: 11, color: '#999', marginTop: -8, marginBottom: 12 }}>
                   支持格式：

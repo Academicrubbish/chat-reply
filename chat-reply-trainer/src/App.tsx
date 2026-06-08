@@ -16,6 +16,7 @@ import AdminPage from './components/AdminPage';
 import TargetSelector from './components/TargetSelector';
 import TargetModal from './components/TargetModal';
 import Toolbar from './components/Toolbar';
+import AttractionBar from './components/AttractionBar';
 import RoundTimeline from './components/RoundTimeline';
 import ChatHeader from './components/ChatHeader';
 import ChatHistory from './components/ChatHistory';
@@ -314,6 +315,7 @@ function AppContent() {
             onDiagnose={diagnoseTarget}
             isMobile={isMobile}
           />
+          <AttractionBar attraction={state.attraction} isMobile={isMobile} />
 
           {/* Analysis step chain — visible in main panel during generation */}
           {state.isAnalyzing && (
