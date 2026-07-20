@@ -25,7 +25,7 @@ import { AnalysisSteps, AnalysisModal, ReviewModal } from './components/Analysis
 import { Card } from 'antd';
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, models, selectedProvider, setSelectedProvider, aiMode, setAiMode, triggerAnalysis, diagnoseTarget, regenAbortRef, abortAllStreams } = useAppState();
+  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, aiMode, setAiMode, triggerAnalysis, diagnoseTarget, regenAbortRef, abortAllStreams } = useAppState();
   const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
   const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
@@ -166,7 +166,7 @@ function AppContent() {
 
     const ctrl = api.regenerateStream(
       s.currentSessionId,
-      { mode, provider: selectedProvider, roundId: currentRoundId },
+      { mode, roundId: currentRoundId },
       handlers.onEvent,
       handlers.onError,
     );
@@ -301,9 +301,6 @@ function AppContent() {
             onSelectSession={switchSession}
             onCreateSession={createNewSession}
             onDeleteSession={deleteSession}
-            models={models}
-            selectedProvider={selectedProvider}
-            onSelectProvider={setSelectedProvider}
             onTriggerAnalysis={triggerAnalysis}
             onOpenAnalysisModal={() => setAnalysisModalOpen(true)}
             onOpenReviewModal={() => setReviewModalOpen(true)}

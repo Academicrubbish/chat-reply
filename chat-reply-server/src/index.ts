@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db } from './db';
 import { buildAdvisorPrompt, buildReviewPrompt, buildQuickMessages, buildFullMessagesOptimized } from './prompt';
-import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
+import { chatCompletion, chatCompletionStream, isLLMBillingError } from './llm';
 import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -104,13 +104,7 @@ app.post('/api/auth/logout', (_req: Request, res: Response) => {
 app.use('/api', (req: Request, res: Response, next) => {
   if (req.path.startsWith('/auth')) return next();
   if (req.path === '/health') return next();
-  if (req.path === '/models') return next();
   authMiddleware(req, res, next);
-});
-
-// Models
-app.get('/api/models', (_req: Request, res: Response) => {
-  res.json({ models: getAvailableModels() });
 });
 
 // Knowledge routes
@@ -415,7 +409,7 @@ function extractNewReplies(raw: string, alreadySent: number): any[] {
 // ===== AI Generate Core =====
 app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) => {
   try {
-    const { herMessage, provider, mode } = req.body;
+    const { herMessage, mode } = req.body;
     if (!herMessage?.trim()) { res.status(400).json({ error: '消息不能为空' }); return; }
     const isQuick = mode === 'quick';
 
@@ -468,8 +462,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     if (!diagnosis) {
       send('step', { step: 'auto_diagnosing' });
       try {
-        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
+        diagnosis = await runDiagnosisInternal(target, recentMessages);
       } catch (diagErr: any) {
+        // 模型欠费：不可恢复，直接下发错误并结束
+        if (isLLMBillingError(diagErr)) {
+          send('error', { message: diagErr.message, code: 'BILLING' });
+          res.end();
+          return;
+        }
         console.error('[Auto-Diagnose Error]', diagErr.message);
         // Create fallback diagnosis so frontend always has something to show
         diagnosis = {
@@ -521,7 +521,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     clearInterval(heartbeatTimer);
     try {
       let sentReplyCount = 0;
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, isQuick ? 4096 : 8192)) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -537,7 +537,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
           }
         }
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束（其余流错误静默，走兜底）
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     if (!isQuick) send('step', { step: 'parsing' });
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
@@ -661,7 +668,7 @@ app.post('/api/sessions/:sessionId/custom-reply', (req: any, res: Response) => {
 
 app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) => {
   try {
-    const { preferredStrategy, provider, mode, roundId: requestedRoundId } = req.body;
+    const { preferredStrategy, mode, roundId: requestedRoundId } = req.body;
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
@@ -724,8 +731,14 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     if (!diagnosis) {
       send('step', { step: 'auto_diagnosing' });
       try {
-        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
+        diagnosis = await runDiagnosisInternal(target, recentMessages);
       } catch (diagErr: any) {
+        // 模型欠费：不可恢复，直接下发错误并结束
+        if (isLLMBillingError(diagErr)) {
+          send('error', { message: diagErr.message, code: 'BILLING' });
+          res.end();
+          return;
+        }
         console.error('[Auto-Diagnose Error]', diagErr.message);
         diagnosis = {
           id: '',
@@ -768,7 +781,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     let raw = '';
     let sentReplyCount = 0;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, isQuick ? 4096 : 8192)) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -784,7 +797,14 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
           }
         }
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     if (!isQuick) send('step', { step: 'parsing' });
 
@@ -849,7 +869,6 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 // POST /api/targets/:targetId/diagnose — SSE stream, target-scoped diagnosis
 app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
   try {
-    const { provider } = req.body;
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.targetId, req.user.userId) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
 
@@ -872,12 +891,19 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
 
     let raw = '';
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, 16384)) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     send('step', { step: 'parsing' });
     let parsed = parseJsonSafely(raw);
@@ -1018,14 +1044,14 @@ app.delete('/api/targets/:targetId/active-diagnosis', (req: any, res: Response) 
 
 // ===== Internal helper: run diagnosis (non-SSE, used by generate/regenerate) =====
 
-async function runDiagnosisInternal(target: any, recentMessages: any[], provider: string): Promise<any> {
+async function runDiagnosisInternal(target: any, recentMessages: any[]): Promise<any> {
   const systemPrompt = buildAdvisorPrompt({ target, recentMessages, contextSummary: '' });
   const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: '请分析对方当前的状态' },
   ];
 
-  const raw = await chatCompletion(messages, provider, 16384);
+  const raw = await chatCompletion(messages, 16384);
   let parsed = parseJsonSafely(raw);
   if (!parsed) {
     console.error('[Auto-Diagnose Parse Error] Full raw output:\n', raw);
@@ -1114,7 +1140,7 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
 // ===== Advisor Analysis & Review Summary =====
 app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => {
   try {
-    const { mode, provider } = req.body;
+    const { mode } = req.body;
     if (mode !== 'advisor' && mode !== 'review') { res.status(400).json({ error: '无效的分析模式' }); return; }
 
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
@@ -1151,12 +1177,19 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     // Stream LLM response
     let raw = '';
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, 16384)) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     // Parse response
     send('step', { step: 'parsing' });

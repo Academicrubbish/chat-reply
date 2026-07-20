@@ -1,4 +1,4 @@
-import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ModelOption, ReplySelection, AnalysisRecord } from '../types';
+import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ReplySelection, AnalysisRecord } from '../types';
 
 const BASE = '/api';
 
@@ -31,8 +31,6 @@ export const login = (username: string, password: string) =>
 
 export const register = (username: string, password: string) =>
   request<{ token: string }>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password }) });
-
-export const getModels = () => request<{ models: ModelOption[] }>('/models');
 
 // Targets
 export const getTargets = () => request<ChatTarget[]>('/targets');
@@ -147,12 +145,11 @@ function sseStream(
 export function generateReplyStream(
   sessionId: string,
   herMessage: string,
-  provider: string = 'zhipu',
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
   mode: string = 'full',
 ): AbortController {
-  return sseStream(`/sessions/${sessionId}/generate`, { herMessage, provider, mode }, onEvent, onError);
+  return sseStream(`/sessions/${sessionId}/generate`, { herMessage, mode }, onEvent, onError);
 }
 
 export const selectReply = (sessionId: string, replyId: number, aiMessageId?: string) =>
@@ -167,7 +164,7 @@ export const customReply = (sessionId: string, text: string) =>
     body: JSON.stringify({ text }),
   });
 
-export const regenerate = (sessionId: string, opts?: { preferredStrategy?: string; mode?: string; provider?: string; roundId?: string }) =>
+export const regenerate = (sessionId: string, opts?: { preferredStrategy?: string; mode?: string; roundId?: string }) =>
   request<GenerateResponse>(`/sessions/${sessionId}/regenerate`, {
     method: 'POST',
     body: JSON.stringify(opts ?? {}),
@@ -175,7 +172,7 @@ export const regenerate = (sessionId: string, opts?: { preferredStrategy?: strin
 
 export function regenerateStream(
   sessionId: string,
-  opts: { preferredStrategy?: string; mode?: string; provider?: string; roundId?: string } = {},
+  opts: { preferredStrategy?: string; mode?: string; roundId?: string } = {},
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
@@ -188,11 +185,10 @@ export const getReplySelections = (sessionId: string) =>
 export function analyzeStream(
   sessionId: string,
   mode: 'advisor' | 'review',
-  provider: string = 'zhipu',
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
-  return sseStream(`/sessions/${sessionId}/analyze`, { mode, provider }, onEvent, onError);
+  return sseStream(`/sessions/${sessionId}/analyze`, { mode }, onEvent, onError);
 }
 
 export const getAnalyses = (targetId: string, type?: 'advisor' | 'review') =>
@@ -223,11 +219,10 @@ export const clearActiveDiagnosis = (targetId: string) =>
 
 export function diagnoseStream(
   targetId: string,
-  provider: string = 'zhipu',
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
 ): AbortController {
-  return sseStream(`/targets/${targetId}/diagnose`, { provider }, onEvent, onError);
+  return sseStream(`/targets/${targetId}/diagnose`, {}, onEvent, onError);
 }
 
 // Admin
