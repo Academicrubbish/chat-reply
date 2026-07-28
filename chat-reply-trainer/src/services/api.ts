@@ -252,6 +252,19 @@ export const getAdminSettings = () =>
 export const updateAdminSettings = (settings: Record<string, string>) =>
   request<{ success: boolean }>('/admin/settings', { method: 'PUT', body: JSON.stringify(settings) });
 
+// Admin: AI 用量监控
+export const getAiUsageOverview = () =>
+  request<any>('/admin/ai-usage/overview');
+
+export const getAiUsageByUser = () =>
+  request<any[]>('/admin/ai-usage/by-user');
+
+export const getAiUsageByFeature = () =>
+  request<any[]>('/admin/ai-usage/by-feature');
+
+export const getAiUsageLogs = (params: Record<string, string | number> = {}) =>
+  request<{ total: number; rows: any[] }>(`/admin/ai-usage/logs?${new URLSearchParams(params as any).toString()}`);
+
 // Knowledge base
 export const getKnowledgeUnits = () =>
   request<{ units: any[]; total: number }>('/knowledge/units');

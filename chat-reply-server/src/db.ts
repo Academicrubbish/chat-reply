@@ -420,13 +420,46 @@ export async function initDb(): Promise<void> {
     // Already migrated or table doesn't exist yet — ignore
   }
 
+  // Migrate: add attraction_score to chat_targets
+  // （原误置于模块顶层，db 尚未初始化即执行导致从未生效；移入 initDb 内确保生效）
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_targets ADD COLUMN attraction_score INTEGER DEFAULT NULL`);
+  } catch {}
+
+  // ===== AI 调用监控日志 =====
+  dbWrapper.exec(`
+    CREATE TABLE IF NOT EXISTS ai_usage_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      mode TEXT DEFAULT '',
+      provider TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      target_id TEXT DEFAULT '',
+      session_id TEXT DEFAULT '',
+      prompt_tokens INTEGER DEFAULT 0,
+      completion_tokens INTEGER DEFAULT 0,
+      total_tokens INTEGER DEFAULT 0,
+      duration_ms INTEGER DEFAULT 0,
+      status TEXT NOT NULL,
+      error_msg TEXT DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usage_user_time ON ai_usage_logs(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_usage_feature_time ON ai_usage_logs(feature, created_at);
+    CREATE INDEX IF NOT EXISTS idx_usage_time ON ai_usage_logs(created_at);
+  `);
+
   dbReady = true;
 }
 
-// Migrate: add attraction_score to chat_targets
-try {
-  dbWrapper.exec(`ALTER TABLE chat_targets ADD COLUMN attraction_score INTEGER DEFAULT NULL`);
-} catch {}
+// 粗略 token 估算：UTF-8 字节数 / 2（中文偏保守），用于 API 未返回 usage 时兜底
+export function estimateTokens(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(Buffer.byteLength(text, 'utf-8') / 2);
+}
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);

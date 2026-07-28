@@ -7,13 +7,14 @@ import {
   ThunderboltOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import * as api from '../services/api';
+import AiUsagePanel from './AiUsagePanel';
 
 interface AdminPageProps {
   onBack: () => void;
   isMobile?: boolean;
 }
 
-type AdminTab = 'overview' | 'users' | 'settings';
+type AdminTab = 'overview' | 'users' | 'settings' | 'ai-usage';
 
 const AdminPage: React.FC<AdminPageProps> = ({ onBack, isMobile = false }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
@@ -90,6 +91,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ onBack, isMobile = false }) => {
     { key: 'overview', icon: <DashboardOutlined />, label: '系统概览' },
     { key: 'users', icon: <TeamOutlined />, label: '用户管理' },
     { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
+    { key: 'ai-usage', icon: <ThunderboltOutlined />, label: 'AI 用量' },
   ];
 
   if (loading) {
@@ -389,6 +391,11 @@ const AdminPage: React.FC<AdminPageProps> = ({ onBack, isMobile = false }) => {
                     </Button>
                   </div>
                 </div>
+              )}
+
+              {/* ===== AI Usage Section ===== */}
+              {activeTab === 'ai-usage' && (
+                <AiUsagePanel isMobile={isMobile} />
               )}
             </div>
           </div>

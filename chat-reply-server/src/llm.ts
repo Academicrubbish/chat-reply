@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { estimateTokens } from './db';
 
 interface ModelConfig {
   provider: string;
@@ -34,14 +35,48 @@ function getModel(provider: string = 'zhipu'): string {
   return process.env[config.modelEnv] || 'glm-5.1';
 }
 
+/** 供埋点记录使用：返回某 provider 当前实际使用的模型名 */
+export function getProviderModel(provider: string = 'zhipu'): string {
+  return getModel(provider);
+}
+
 export function getAvailableModels(): { provider: string; label: string; model: string }[] {
   return MODEL_REGISTRY
     .filter(m => !!process.env[m.apiKeyEnv])
     .map(m => ({ provider: m.provider, label: m.label, model: process.env[m.modelEnv] || '' }));
 }
 
-export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 16384, maxRetries = 1): Promise<string> {
+/** 单次调用的 token 消耗；estimated=true 表示 API 未返回 usage、由字节数估算 */
+export interface LLMUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated: boolean;
+}
+
+export interface ChatResult {
+  content: string;
+  usage: LLMUsage;
+}
+
+/** 优先取 API 返回的真实 usage，否则用字节数估算兜底 */
+function usageFromResponse(u: any, fallbackPromptText: string, fallbackCompletionText: string): LLMUsage {
+  if (u && typeof u.total_tokens === 'number') {
+    return {
+      prompt_tokens: u.prompt_tokens || 0,
+      completion_tokens: u.completion_tokens || 0,
+      total_tokens: u.total_tokens,
+      estimated: false,
+    };
+  }
+  const pt = estimateTokens(fallbackPromptText);
+  const ct = estimateTokens(fallbackCompletionText);
+  return { prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct, estimated: true };
+}
+
+export async function chatCompletion(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxTokens = 16384, maxRetries = 1): Promise<ChatResult> {
   let lastError: Error | null = null;
+  const inputText = messages.map(m => m.content).join('');
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await getClient(provider).chat.completions.create({
@@ -50,7 +85,9 @@ export async function chatCompletion(messages: Array<{ role: string; content: st
         temperature: 0.8,
         max_tokens: maxTokens,
       });
-      return response.choices[0].message.content || '';
+      const content = response.choices[0].message.content || '';
+      const usage = usageFromResponse((response as any).usage, inputText, content);
+      return { content, usage };
     } catch (err: any) {
       lastError = err;
       if (err.message?.includes('未配置') || err.message?.includes('未知的模型提供者')) {
@@ -64,8 +101,15 @@ export async function chatCompletion(messages: Array<{ role: string; content: st
   throw lastError || new Error('LLM 非流式调用失败');
 }
 
-export async function* chatCompletionStream(messages: Array<{ role: string; content: string }>, provider: string = 'zhipu', maxRetries = 1, maxTokens = 16384): AsyncGenerator<string> {
+export async function* chatCompletionStream(
+  messages: Array<{ role: string; content: string }>,
+  provider: string = 'zhipu',
+  maxRetries = 1,
+  maxTokens = 16384,
+  onUsage?: (u: LLMUsage) => void,
+): AsyncGenerator<string> {
   let lastError: Error | null = null;
+  const inputText = messages.map(m => m.content).join('');
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const stream = await getClient(provider).chat.completions.create({
@@ -74,10 +118,22 @@ export async function* chatCompletionStream(messages: Array<{ role: string; cont
         temperature: 0.8,
         max_tokens: maxTokens,
         stream: true,
-      });
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) yield delta;
+        stream_options: { include_usage: true },
+      } as any);
+      let usageReported = false;
+      let collected = '';
+      for await (const chunk of stream as any) {
+        // usage 通常出现在最后一个 chunk（此时 choices 为空数组）
+        if (chunk.usage) {
+          // token 采集是旁路：回调/计算任何异常都不得中断主流式生成
+          try { onUsage?.(usageFromResponse(chunk.usage, inputText, collected)); usageReported = true; } catch {}
+        }
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) { collected += delta; yield delta; }
+      }
+      // 流正常结束但 provider 未返回 usage → 估算兜底，保证调用方一定拿到 usage
+      if (!usageReported) {
+        try { onUsage?.(usageFromResponse(null, inputText, collected)); } catch {}
       }
       return;
     } catch (err: any) {

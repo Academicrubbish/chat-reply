@@ -7,9 +7,9 @@ import rateLimit from 'express-rate-limit';
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
-import { initDb, default as db } from './db';
+import { initDb, default as db, estimateTokens } from './db';
 import { buildAdvisorPrompt, buildReviewPrompt, buildQuickMessages, buildFullMessagesOptimized } from './prompt';
-import { chatCompletion, chatCompletionStream, getAvailableModels } from './llm';
+import { chatCompletion, chatCompletionStream, getAvailableModels, getProviderModel, type LLMUsage } from './llm';
 import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -412,8 +412,37 @@ function extractNewReplies(raw: string, alreadySent: number): any[] {
   return found.slice(alreadySent);
 }
 
+// ===== AI 调用监控埋点（旁路：写入失败不影响主流程） =====
+function logAiUsage(p: {
+  userId: string; username: string; feature: string; mode?: string;
+  provider?: string; model?: string; targetId?: string; sessionId?: string;
+  usage: LLMUsage | null; rawText?: string; durationMs: number;
+  status: 'success' | 'fallback' | 'error'; errorMsg?: string;
+}) {
+  try {
+    // usage 为 null（流式中断 / 走降级 / 报错）→ 用 rawText 估算
+    const u = p.usage ?? {
+      prompt_tokens: 0,
+      completion_tokens: estimateTokens(p.rawText ?? ''),
+      total_tokens: estimateTokens(p.rawText ?? ''),
+      estimated: true,
+    };
+    db.prepare(
+      `INSERT INTO ai_usage_logs (id,user_id,username,feature,mode,provider,model,target_id,session_id,prompt_tokens,completion_tokens,total_tokens,duration_ms,status,error_msg,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      uuid(), p.userId, p.username, p.feature, p.mode || '', p.provider || '', p.model || '',
+      p.targetId || '', p.sessionId || '', u.prompt_tokens, u.completion_tokens, u.total_tokens,
+      p.durationMs, p.status, (p.errorMsg || '').slice(0, 500), Date.now()
+    );
+  } catch (e) {
+    console.error('[AI Usage Log] failed to write:', (e as Error).message);
+  }
+}
+
 // ===== AI Generate Core =====
 app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) => {
+  const handlerT0 = Date.now();
   try {
     const { herMessage, provider, mode } = req.body;
     if (!herMessage?.trim()) { res.status(400).json({ error: '消息不能为空' }); return; }
@@ -468,7 +497,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     if (!diagnosis) {
       send('step', { step: 'auto_diagnosing' });
       try {
-        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
+        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu', { userId: req.user.userId, username: req.user.username, sessionId: session.id });
       } catch (diagErr: any) {
         console.error('[Auto-Diagnose Error]', diagErr.message);
         // Create fallback diagnosis so frontend always has something to show
@@ -516,12 +545,13 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     // Stream reply generation
     if (!isQuick) send('step', { step: 'analyze' });
     let raw = '';
+    let aiUsage: LLMUsage | null = null;
     send('step', { step: 'generating' });
 
     clearInterval(heartbeatTimer);
     try {
       let sentReplyCount = 0;
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -543,6 +573,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
 
     let parsed = parseJsonSafely(raw);
+    const usedFallback = !parsed;
     if (!parsed) {
       console.error('[LLM Parse Error] Full raw output:\n', raw);
       // Send debug info to frontend so user can inspect in browser console
@@ -602,10 +633,23 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
       }
     })();
 
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'generate',
+      mode: isQuick ? 'quick' : 'full', provider: provider || 'zhipu',
+      model: getProviderModel(provider || 'zhipu'), targetId: target.id, sessionId: session.id,
+      usage: aiUsage, rawText: raw, durationMs: Date.now() - handlerT0,
+      status: usedFallback ? 'fallback' : 'success',
+    });
     send('done', { contextUsage, roundId, version: 1, attraction: attractionResult || undefined });
     res.end();
   } catch (err: any) {
     console.error('Generate error:', err);
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'generate',
+      mode: req.body?.mode === 'quick' ? 'quick' : 'full', provider: req.body?.provider || 'zhipu',
+      model: getProviderModel(req.body?.provider || 'zhipu'), sessionId: req.params.sessionId,
+      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+    });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
       res.end();
@@ -660,6 +704,7 @@ app.post('/api/sessions/:sessionId/custom-reply', (req: any, res: Response) => {
 });
 
 app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) => {
+  const handlerT0 = Date.now();
   try {
     const { preferredStrategy, provider, mode, roundId: requestedRoundId } = req.body;
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
@@ -724,7 +769,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     if (!diagnosis) {
       send('step', { step: 'auto_diagnosing' });
       try {
-        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu');
+        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu', { userId: req.user.userId, username: req.user.username, sessionId: session.id });
       } catch (diagErr: any) {
         console.error('[Auto-Diagnose Error]', diagErr.message);
         diagnosis = {
@@ -767,8 +812,9 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     clearInterval(heartbeatTimer);
     let raw = '';
     let sentReplyCount = 0;
+    let aiUsage: LLMUsage | null = null;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -789,6 +835,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     if (!isQuick) send('step', { step: 'parsing' });
 
     let parsed = parseJsonSafely(raw);
+    const usedFallback = !parsed;
     if (!parsed) {
       console.error('[Regen Parse Error] All fallback attempts failed. Raw:', raw.slice(0, 500));
       parsed = SAFE_FALLBACK;
@@ -833,10 +880,23 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
       }
     }
 
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'regenerate',
+      mode: isQuick ? 'quick' : 'full', provider: provider || 'zhipu',
+      model: getProviderModel(provider || 'zhipu'), targetId: target.id, sessionId: session.id,
+      usage: aiUsage, rawText: raw, durationMs: Date.now() - handlerT0,
+      status: usedFallback ? 'fallback' : 'success',
+    });
     send('done', { contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) }, roundId, version: nextVersion, attraction: regenAttrResult || undefined });
     res.end();
   } catch (err: any) {
     console.error('Regenerate error:', err);
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'regenerate',
+      mode: req.body?.mode === 'quick' ? 'quick' : 'full', provider: req.body?.provider || 'zhipu',
+      model: getProviderModel(req.body?.provider || 'zhipu'), sessionId: req.params.sessionId,
+      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+    });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
       res.end();
@@ -848,6 +908,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 
 // POST /api/targets/:targetId/diagnose — SSE stream, target-scoped diagnosis
 app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
+  const handlerT0 = Date.now();
   try {
     const { provider } = req.body;
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.targetId, req.user.userId) as any;
@@ -871,8 +932,9 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     ];
 
     let raw = '';
+    let aiUsage: LLMUsage | null = null;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -883,6 +945,12 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     let parsed = parseJsonSafely(raw);
     if (!parsed) {
       console.error('[Diagnose Parse Error] Full raw output:\n', raw);
+      logAiUsage({
+        userId: req.user.userId, username: req.user.username, feature: 'diagnose',
+        provider: provider || 'zhipu', model: getProviderModel(provider || 'zhipu'),
+        targetId: target.id, usage: aiUsage, rawText: raw,
+        durationMs: Date.now() - handlerT0, status: 'error', errorMsg: '诊断结果解析失败',
+      });
       send('debug_raw', { source: 'diagnose', rawLength: raw.length, rawPreview: raw.slice(0, 800) });
       res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试', rawLength: raw.length, rawPreview: raw.slice(0, 500) })}\n\n`);
       res.end();
@@ -968,10 +1036,22 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
       attraction: attractionScore !== null ? { score: attractionScore, reason: parsed.attraction?.reason || '' } : undefined,
     };
 
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'diagnose',
+      provider: provider || 'zhipu', model: getProviderModel(provider || 'zhipu'),
+      targetId: target.id, usage: aiUsage, rawText: raw,
+      durationMs: Date.now() - handlerT0, status: 'success',
+    });
     send('diagnosis_done', { diagnosis });
     res.end();
   } catch (err: any) {
     console.error('Diagnose error:', err);
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'diagnose',
+      provider: req.body?.provider || 'zhipu', model: getProviderModel(req.body?.provider || 'zhipu'),
+      targetId: req.params.targetId, usage: null,
+      durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+    });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || '诊断服务异常' })}\n\n`);
       res.end();
@@ -1018,14 +1098,35 @@ app.delete('/api/targets/:targetId/active-diagnosis', (req: any, res: Response) 
 
 // ===== Internal helper: run diagnosis (non-SSE, used by generate/regenerate) =====
 
-async function runDiagnosisInternal(target: any, recentMessages: any[], provider: string): Promise<any> {
+async function runDiagnosisInternal(target: any, recentMessages: any[], provider: string, caller: { userId: string; username: string; sessionId?: string }): Promise<any> {
   const systemPrompt = buildAdvisorPrompt({ target, recentMessages, contextSummary: '' });
   const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: '请分析对方当前的状态' },
   ];
 
-  const raw = await chatCompletion(messages, provider, 16384);
+  const t0 = Date.now();
+  let raw = '';
+  let diagUsage: LLMUsage | null = null;
+  try {
+    const result = await chatCompletion(messages, provider, 16384);
+    raw = result.content;
+    diagUsage = result.usage;
+  } catch (e: any) {
+    logAiUsage({
+      userId: caller.userId, username: caller.username, feature: 'auto_diagnose',
+      provider, model: getProviderModel(provider), targetId: target.id,
+      sessionId: caller.sessionId, usage: null, durationMs: Date.now() - t0,
+      status: 'error', errorMsg: e.message,
+    });
+    throw e;
+  }
+  logAiUsage({
+    userId: caller.userId, username: caller.username, feature: 'auto_diagnose',
+    provider, model: getProviderModel(provider), targetId: target.id,
+    sessionId: caller.sessionId, usage: diagUsage, rawText: raw,
+    durationMs: Date.now() - t0, status: 'success',
+  });
   let parsed = parseJsonSafely(raw);
   if (!parsed) {
     console.error('[Auto-Diagnose Parse Error] Full raw output:\n', raw);
@@ -1113,6 +1214,7 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
 
 // ===== Advisor Analysis & Review Summary =====
 app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => {
+  const handlerT0 = Date.now();
   try {
     const { mode, provider } = req.body;
     if (mode !== 'advisor' && mode !== 'review') { res.status(400).json({ error: '无效的分析模式' }); return; }
@@ -1150,8 +1252,9 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
 
     // Stream LLM response
     let raw = '';
+    let aiUsage: LLMUsage | null = null;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384)) {
+      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -1161,6 +1264,7 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     // Parse response
     send('step', { step: 'parsing' });
     let parsed = parseJsonSafely(raw);
+    const usedFallback = !parsed;
     if (!parsed) {
       console.error('[Analyze Parse Error] Full raw output:\n', raw);
       send('debug_raw', { source: mode, rawLength: raw.length, rawPreview: raw.slice(0, 800) });
@@ -1225,10 +1329,22 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
           ov.advice || '', JSON.stringify(ov.knowledgeGaps || []), Date.now());
     }
 
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'analyze',
+      mode, provider: provider || 'zhipu', model: getProviderModel(provider || 'zhipu'),
+      targetId: target.id, sessionId: session.id, usage: aiUsage, rawText: raw,
+      durationMs: Date.now() - handlerT0, status: usedFallback ? 'fallback' : 'success',
+    });
     send('analysis_done', { result: parsed, aiMessageId: aiMsgId });
     res.end();
   } catch (err: any) {
     console.error('Analyze error:', err);
+    logAiUsage({
+      userId: req.user.userId, username: req.user.username, feature: 'analyze',
+      mode: req.body?.mode, provider: req.body?.provider || 'zhipu',
+      model: getProviderModel(req.body?.provider || 'zhipu'), sessionId: req.params.sessionId,
+      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+    });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || '分析服务异常' })}\n\n`);
       res.end();
@@ -1412,6 +1528,95 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req: any, res: 
     }
   }
   res.json({ success: true });
+});
+
+// ===== Admin: AI 用量监控 =====
+
+// 用量总览：总量 / 状态分布 / 今日 / 近 7 天趋势
+app.get('/api/admin/ai-usage/overview', authMiddleware, adminMiddleware, (_req: any, res: Response) => {
+  const totals = db.prepare(`SELECT
+    COUNT(*) as calls,
+    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+    COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+    COALESCE(SUM(total_tokens), 0) as total_tokens
+  FROM ai_usage_logs`).get() as any;
+
+  const byStatus = db.prepare(`SELECT status, COUNT(*) as calls, COALESCE(SUM(total_tokens), 0) as tokens
+    FROM ai_usage_logs GROUP BY status`).all() as any[];
+
+  const fmtDate = (ms: number) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const sevenDaysAgo = todayStart.getTime() - 6 * 86400000;
+  const recent = db.prepare(`SELECT total_tokens, created_at FROM ai_usage_logs WHERE created_at >= ?`).all(sevenDaysAgo) as any[];
+  const dayMap: Record<string, { calls: number; tokens: number }> = {};
+  let todayCalls = 0, todayTokens = 0;
+  const todayKey = fmtDate(Date.now());
+  for (const l of recent) {
+    const key = fmtDate(l.created_at);
+    dayMap[key] = dayMap[key] || { calls: 0, tokens: 0 };
+    dayMap[key].calls++;
+    dayMap[key].tokens += l.total_tokens || 0;
+    if (key === todayKey) { todayCalls++; todayTokens += l.total_tokens || 0; }
+  }
+  // 补齐近 7 天的空缺天，前端图表直接渲染
+  const daily: any[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const key = fmtDate(todayStart.getTime() - i * 86400000);
+    daily.push({ date: key, ...(dayMap[key] || { calls: 0, tokens: 0 }) });
+  }
+
+  res.json({ totals, byStatus, today: { calls: todayCalls, tokens: todayTokens }, daily });
+});
+
+// 按用户聚合
+app.get('/api/admin/ai-usage/by-user', authMiddleware, adminMiddleware, (_req: any, res: Response) => {
+  const rows = db.prepare(`SELECT
+    user_id, MAX(username) as username,
+    COUNT(*) as calls,
+    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+    COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+    COALESCE(SUM(total_tokens), 0) as total_tokens,
+    MAX(created_at) as last_call_at
+  FROM ai_usage_logs GROUP BY user_id ORDER BY total_tokens DESC`).all() as any[];
+  res.json(rows);
+});
+
+// 按功能聚合（含状态分布与均 token/次）
+app.get('/api/admin/ai-usage/by-feature', authMiddleware, adminMiddleware, (_req: any, res: Response) => {
+  const rows = db.prepare(`SELECT
+    feature,
+    COUNT(*) as calls,
+    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+    COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+    COALESCE(SUM(total_tokens), 0) as total_tokens,
+    COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) as success,
+    COALESCE(SUM(CASE WHEN status='fallback' THEN 1 ELSE 0 END), 0) as fallback,
+    COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END), 0) as error
+  FROM ai_usage_logs GROUP BY feature ORDER BY total_tokens DESC`).all() as any[];
+  res.json(rows.map((r: any) => ({ ...r, avg_tokens: r.calls > 0 ? Math.round(r.total_tokens / r.calls) : 0 })));
+});
+
+// 明细流水（分页 + 筛选）
+app.get('/api/admin/ai-usage/logs', authMiddleware, adminMiddleware, (req: any, res: Response) => {
+  const { userId, feature, status, mode } = req.query;
+  const days = parseInt(req.query.days) || 30;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  const since = Date.now() - days * 86400000;
+  const conds = ['created_at >= ?'];
+  const params: any[] = [since];
+  if (userId) { conds.push('user_id = ?'); params.push(userId); }
+  if (feature) { conds.push('feature = ?'); params.push(feature); }
+  if (status) { conds.push('status = ?'); params.push(status); }
+  if (mode) { conds.push('mode = ?'); params.push(mode); }
+  const where = conds.join(' AND ');
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM ai_usage_logs WHERE ${where}`).get(...params) as any).c;
+  const rows = db.prepare(`SELECT id,user_id,username,feature,mode,provider,model,target_id,session_id,prompt_tokens,completion_tokens,total_tokens,duration_ms,status,error_msg,created_at
+    FROM ai_usage_logs WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
+  res.json({ total, rows });
 });
 
 app.listen(PORT, async () => {
