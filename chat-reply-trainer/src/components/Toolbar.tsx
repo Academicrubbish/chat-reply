@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button, Progress, Select, Tag, Tooltip, Popconfirm } from 'antd';
 import { EditOutlined, RobotOutlined, PlusOutlined, UnorderedListOutlined, DeleteOutlined, BarChartOutlined, AimOutlined } from '@ant-design/icons';
-import type { ChatTarget, AISession, ModelOption, AnalysisData, GenerateMode, TargetDiagnosis } from '../types';
+import type { ChatTarget, AISession, AnalysisData, GenerateMode, TargetDiagnosis } from '../types';
 
 const tagColorMap: Record<string, string> = {
   aggressive: 'red', moderate: 'blue', conservative: 'green',
@@ -28,10 +28,6 @@ interface ToolbarProps {
   onSelectSession: (id: string) => void;
   onCreateSession: () => void;
   onDeleteSession: (id: string) => void;
-  // Model
-  models?: ModelOption[];
-  selectedProvider?: string;
-  onSelectProvider?: (provider: string) => void;
   // Analysis
   onTriggerAnalysis?: (mode: 'advisor' | 'review') => void;
   onOpenAnalysisModal?: () => void;
@@ -51,7 +47,6 @@ interface ToolbarProps {
 const Toolbar: React.FC<ToolbarProps> = ({
   target, onEditTarget, onAIAssist, isGenerating, aiMode,
   session, sessions, onSelectSession, onCreateSession, onDeleteSession,
-  models = [], selectedProvider = 'zhipu', onSelectProvider,
   onOpenAnalysisModal, onOpenReviewModal, isAnalyzing = false, analysisMode = null,
   analysis, activeDiagnosis, isDiagnosing = false, isMobile = false,
 }) => {
@@ -275,12 +270,6 @@ const Toolbar: React.FC<ToolbarProps> = ({
             )}
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
-              {models.length > 0 && onSelectProvider && (
-                <Select size="small" value={selectedProvider} style={{ width: 120 }}
-                  onChange={onSelectProvider}
-                  options={models.map(m => ({ value: m.provider, label: m.label }))}
-                />
-              )}
               <Select size="small" value={session?.id} placeholder="选择窗口" style={{ width: 140 }}
                 onChange={onSelectSession}
                 options={sessions.map((s, i) => ({ value: s.id, label: s.title || `窗口 ${i + 1}` }))}

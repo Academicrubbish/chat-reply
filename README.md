@@ -195,7 +195,7 @@ ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
 ZHIPU_MODEL=glm-5.1
 ```
 
-> 获取 API Key：[open.bigmodel.cn](https://open.bigmodel.cn) · 也支持小米 MiMo 等其他 OpenAI 兼容模型
+> 获取 API Key：[open.bigmodel.cn](https://open.bigmodel.cn) · 仅支持智谱 GLM（OpenAI 兼容协议）
 
 ### 试试效果
 
@@ -214,7 +214,7 @@ node test-data/seed.js
 |------|------|------|
 | 前端 | React 19 + Vite 8 + Ant Design 6 + Tailwind CSS 4 | SSE 流式渲染 + 响应式 |
 | 后端 | Express 5 + TypeScript + SQLite (sql.js) | 零配置数据库 |
-| AI | 智谱 GLM / 小米 MiMo | OpenAI 兼容，多模型切换 |
+| AI | 智谱 GLM | OpenAI 兼容协议 |
 | 知识引擎 | RIA++ 方法论 · 23 知识单元 | 静态/动态 Prompt 拆分 + 动态匹配注入 |
 
 ---

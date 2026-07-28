@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { initDb, default as db, estimateTokens } from './db';
 import { buildAdvisorPrompt, buildReviewPrompt, buildQuickMessages, buildFullMessagesOptimized } from './prompt';
-import { chatCompletion, chatCompletionStream, getAvailableModels, getProviderModel, type LLMUsage } from './llm';
+import { chatCompletion, chatCompletionStream, isLLMBillingError, getCurrentModel, type LLMUsage } from './llm';
 import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -104,13 +104,7 @@ app.post('/api/auth/logout', (_req: Request, res: Response) => {
 app.use('/api', (req: Request, res: Response, next) => {
   if (req.path.startsWith('/auth')) return next();
   if (req.path === '/health') return next();
-  if (req.path === '/models') return next();
   authMiddleware(req, res, next);
-});
-
-// Models
-app.get('/api/models', (_req: Request, res: Response) => {
-  res.json({ models: getAvailableModels() });
 });
 
 // Knowledge routes
@@ -444,7 +438,7 @@ function logAiUsage(p: {
 app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) => {
   const handlerT0 = Date.now();
   try {
-    const { herMessage, provider, mode } = req.body;
+    const { herMessage, mode } = req.body;
     if (!herMessage?.trim()) { res.status(400).json({ error: '消息不能为空' }); return; }
     const isQuick = mode === 'quick';
 
@@ -497,8 +491,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     if (!diagnosis) {
       send('step', { step: 'auto_diagnosing' });
       try {
-        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu', { userId: req.user.userId, username: req.user.username, sessionId: session.id });
+        diagnosis = await runDiagnosisInternal(target, recentMessages, { userId: req.user.userId, username: req.user.username, sessionId: session.id });
       } catch (diagErr: any) {
+        // 模型欠费：不可恢复，直接下发错误并结束
+        if (isLLMBillingError(diagErr)) {
+          send('error', { message: diagErr.message, code: 'BILLING' });
+          res.end();
+          return;
+        }
         console.error('[Auto-Diagnose Error]', diagErr.message);
         // Create fallback diagnosis so frontend always has something to show
         diagnosis = {
@@ -551,7 +551,7 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     clearInterval(heartbeatTimer);
     try {
       let sentReplyCount = 0;
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192, (u: LLMUsage) => { aiUsage = u; })) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, isQuick ? 4096 : 8192, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -567,7 +567,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
           }
         }
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束（其余流错误静默，走兜底）
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     if (!isQuick) send('step', { step: 'parsing' });
     console.log('[LLM Raw] length:', raw.length, 'preview:', raw.slice(0, 300));
@@ -635,10 +642,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
 
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'generate',
-      mode: isQuick ? 'quick' : 'full', provider: provider || 'zhipu',
-      model: getProviderModel(provider || 'zhipu'), targetId: target.id, sessionId: session.id,
-      usage: aiUsage, rawText: raw, durationMs: Date.now() - handlerT0,
-      status: usedFallback ? 'fallback' : 'success',
+      mode: isQuick ? 'quick' : 'full', provider: 'zhipu', model: getCurrentModel(),
+      targetId: target.id, sessionId: session.id, usage: aiUsage, rawText: raw,
+      durationMs: Date.now() - handlerT0, status: usedFallback ? 'fallback' : 'success',
     });
     send('done', { contextUsage, roundId, version: 1, attraction: attractionResult || undefined });
     res.end();
@@ -646,9 +652,9 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
     console.error('Generate error:', err);
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'generate',
-      mode: req.body?.mode === 'quick' ? 'quick' : 'full', provider: req.body?.provider || 'zhipu',
-      model: getProviderModel(req.body?.provider || 'zhipu'), sessionId: req.params.sessionId,
-      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+      mode: req.body?.mode === 'quick' ? 'quick' : 'full', provider: 'zhipu', model: getCurrentModel(),
+      sessionId: req.params.sessionId, usage: null, durationMs: Date.now() - handlerT0,
+      status: 'error', errorMsg: err.message,
     });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
@@ -706,7 +712,7 @@ app.post('/api/sessions/:sessionId/custom-reply', (req: any, res: Response) => {
 app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) => {
   const handlerT0 = Date.now();
   try {
-    const { preferredStrategy, provider, mode, roundId: requestedRoundId } = req.body;
+    const { preferredStrategy, mode, roundId: requestedRoundId } = req.body;
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
     if (!session || !verifyTargetOwnership(session.target_id, req.user.userId)) { res.status(404).json({ error: '辅导窗口不存在' }); return; }
 
@@ -769,8 +775,14 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     if (!diagnosis) {
       send('step', { step: 'auto_diagnosing' });
       try {
-        diagnosis = await runDiagnosisInternal(target, recentMessages, provider || 'zhipu', { userId: req.user.userId, username: req.user.username, sessionId: session.id });
+        diagnosis = await runDiagnosisInternal(target, recentMessages, { userId: req.user.userId, username: req.user.username, sessionId: session.id });
       } catch (diagErr: any) {
+        // 模型欠费：不可恢复，直接下发错误并结束
+        if (isLLMBillingError(diagErr)) {
+          send('error', { message: diagErr.message, code: 'BILLING' });
+          res.end();
+          return;
+        }
         console.error('[Auto-Diagnose Error]', diagErr.message);
         diagnosis = {
           id: '',
@@ -814,7 +826,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     let sentReplyCount = 0;
     let aiUsage: LLMUsage | null = null;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, isQuick ? 4096 : 8192, (u: LLMUsage) => { aiUsage = u; })) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, isQuick ? 4096 : 8192, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
@@ -830,7 +842,14 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
           }
         }
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     if (!isQuick) send('step', { step: 'parsing' });
 
@@ -882,10 +901,9 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'regenerate',
-      mode: isQuick ? 'quick' : 'full', provider: provider || 'zhipu',
-      model: getProviderModel(provider || 'zhipu'), targetId: target.id, sessionId: session.id,
-      usage: aiUsage, rawText: raw, durationMs: Date.now() - handlerT0,
-      status: usedFallback ? 'fallback' : 'success',
+      mode: isQuick ? 'quick' : 'full', provider: 'zhipu', model: getCurrentModel(),
+      targetId: target.id, sessionId: session.id, usage: aiUsage, rawText: raw,
+      durationMs: Date.now() - handlerT0, status: usedFallback ? 'fallback' : 'success',
     });
     send('done', { contextUsage: { estimatedTokens, maxTokens: 8000, percentage: Math.min(Math.round(estimatedTokens / 8000 * 100), 100) }, roundId, version: nextVersion, attraction: regenAttrResult || undefined });
     res.end();
@@ -893,9 +911,9 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
     console.error('Regenerate error:', err);
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'regenerate',
-      mode: req.body?.mode === 'quick' ? 'quick' : 'full', provider: req.body?.provider || 'zhipu',
-      model: getProviderModel(req.body?.provider || 'zhipu'), sessionId: req.params.sessionId,
-      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+      mode: req.body?.mode === 'quick' ? 'quick' : 'full', provider: 'zhipu', model: getCurrentModel(),
+      sessionId: req.params.sessionId, usage: null, durationMs: Date.now() - handlerT0,
+      status: 'error', errorMsg: err.message,
     });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || 'AI 服务异常' })}\n\n`);
@@ -910,7 +928,6 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
 app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
   const handlerT0 = Date.now();
   try {
-    const { provider } = req.body;
     const target = db.prepare('SELECT * FROM chat_targets WHERE id = ? AND user_id = ?').get(req.params.targetId, req.user.userId) as any;
     if (!target) { res.status(404).json({ error: '聊天对象不存在' }); return; }
 
@@ -934,12 +951,19 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     let raw = '';
     let aiUsage: LLMUsage | null = null;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384, (u: LLMUsage) => { aiUsage = u; })) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, 16384, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     send('step', { step: 'parsing' });
     let parsed = parseJsonSafely(raw);
@@ -947,9 +971,9 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
       console.error('[Diagnose Parse Error] Full raw output:\n', raw);
       logAiUsage({
         userId: req.user.userId, username: req.user.username, feature: 'diagnose',
-        provider: provider || 'zhipu', model: getProviderModel(provider || 'zhipu'),
-        targetId: target.id, usage: aiUsage, rawText: raw,
-        durationMs: Date.now() - handlerT0, status: 'error', errorMsg: '诊断结果解析失败',
+        provider: 'zhipu', model: getCurrentModel(), targetId: target.id,
+        usage: aiUsage, rawText: raw, durationMs: Date.now() - handlerT0,
+        status: 'error', errorMsg: '诊断结果解析失败',
       });
       send('debug_raw', { source: 'diagnose', rawLength: raw.length, rawPreview: raw.slice(0, 800) });
       res.write(`event: error\ndata: ${JSON.stringify({ message: '诊断结果解析失败，请重试', rawLength: raw.length, rawPreview: raw.slice(0, 500) })}\n\n`);
@@ -1038,9 +1062,8 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
 
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'diagnose',
-      provider: provider || 'zhipu', model: getProviderModel(provider || 'zhipu'),
-      targetId: target.id, usage: aiUsage, rawText: raw,
-      durationMs: Date.now() - handlerT0, status: 'success',
+      provider: 'zhipu', model: getCurrentModel(), targetId: target.id,
+      usage: aiUsage, rawText: raw, durationMs: Date.now() - handlerT0, status: 'success',
     });
     send('diagnosis_done', { diagnosis });
     res.end();
@@ -1048,9 +1071,8 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
     console.error('Diagnose error:', err);
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'diagnose',
-      provider: req.body?.provider || 'zhipu', model: getProviderModel(req.body?.provider || 'zhipu'),
-      targetId: req.params.targetId, usage: null,
-      durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+      provider: 'zhipu', model: getCurrentModel(), targetId: req.params.targetId,
+      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
     });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || '诊断服务异常' })}\n\n`);
@@ -1098,7 +1120,7 @@ app.delete('/api/targets/:targetId/active-diagnosis', (req: any, res: Response) 
 
 // ===== Internal helper: run diagnosis (non-SSE, used by generate/regenerate) =====
 
-async function runDiagnosisInternal(target: any, recentMessages: any[], provider: string, caller: { userId: string; username: string; sessionId?: string }): Promise<any> {
+async function runDiagnosisInternal(target: any, recentMessages: any[], caller: { userId: string; username: string; sessionId?: string }): Promise<any> {
   const systemPrompt = buildAdvisorPrompt({ target, recentMessages, contextSummary: '' });
   const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: systemPrompt },
@@ -1109,13 +1131,13 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
   let raw = '';
   let diagUsage: LLMUsage | null = null;
   try {
-    const result = await chatCompletion(messages, provider, 16384);
+    const result = await chatCompletion(messages, 16384);
     raw = result.content;
     diagUsage = result.usage;
   } catch (e: any) {
     logAiUsage({
       userId: caller.userId, username: caller.username, feature: 'auto_diagnose',
-      provider, model: getProviderModel(provider), targetId: target.id,
+      provider: 'zhipu', model: getCurrentModel(), targetId: target.id,
       sessionId: caller.sessionId, usage: null, durationMs: Date.now() - t0,
       status: 'error', errorMsg: e.message,
     });
@@ -1123,7 +1145,7 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
   }
   logAiUsage({
     userId: caller.userId, username: caller.username, feature: 'auto_diagnose',
-    provider, model: getProviderModel(provider), targetId: target.id,
+    provider: 'zhipu', model: getCurrentModel(), targetId: target.id,
     sessionId: caller.sessionId, usage: diagUsage, rawText: raw,
     durationMs: Date.now() - t0, status: 'success',
   });
@@ -1216,7 +1238,7 @@ async function runDiagnosisInternal(target: any, recentMessages: any[], provider
 app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => {
   const handlerT0 = Date.now();
   try {
-    const { mode, provider } = req.body;
+    const { mode } = req.body;
     if (mode !== 'advisor' && mode !== 'review') { res.status(400).json({ error: '无效的分析模式' }); return; }
 
     const session = db.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(req.params.sessionId) as any;
@@ -1254,12 +1276,19 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     let raw = '';
     let aiUsage: LLMUsage | null = null;
     try {
-      for await (const delta of chatCompletionStream(conversationMessages, provider || 'zhipu', 1, 16384, (u: LLMUsage) => { aiUsage = u; })) {
+      for await (const delta of chatCompletionStream(conversationMessages, 1, 16384, (u: LLMUsage) => { aiUsage = u; })) {
         raw += delta;
         if (clientDisconnected) break;
         send('delta', { text: delta });
       }
-    } catch { /* stream error */ }
+    } catch (streamErr: any) {
+      // 模型欠费：不可恢复，直接下发错误并结束
+      if (isLLMBillingError(streamErr)) {
+        send('error', { message: streamErr.message, code: 'BILLING' });
+        res.end();
+        return;
+      }
+    }
 
     // Parse response
     send('step', { step: 'parsing' });
@@ -1331,7 +1360,7 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
 
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'analyze',
-      mode, provider: provider || 'zhipu', model: getProviderModel(provider || 'zhipu'),
+      mode, provider: 'zhipu', model: getCurrentModel(),
       targetId: target.id, sessionId: session.id, usage: aiUsage, rawText: raw,
       durationMs: Date.now() - handlerT0, status: usedFallback ? 'fallback' : 'success',
     });
@@ -1341,9 +1370,9 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
     console.error('Analyze error:', err);
     logAiUsage({
       userId: req.user.userId, username: req.user.username, feature: 'analyze',
-      mode: req.body?.mode, provider: req.body?.provider || 'zhipu',
-      model: getProviderModel(req.body?.provider || 'zhipu'), sessionId: req.params.sessionId,
-      usage: null, durationMs: Date.now() - handlerT0, status: 'error', errorMsg: err.message,
+      mode: req.body?.mode, provider: 'zhipu', model: getCurrentModel(),
+      sessionId: req.params.sessionId, usage: null, durationMs: Date.now() - handlerT0,
+      status: 'error', errorMsg: err.message,
     });
     try {
       res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || '分析服务异常' })}\n\n`);
@@ -1561,7 +1590,6 @@ app.get('/api/admin/ai-usage/overview', authMiddleware, adminMiddleware, (_req: 
     dayMap[key].tokens += l.total_tokens || 0;
     if (key === todayKey) { todayCalls++; todayTokens += l.total_tokens || 0; }
   }
-  // 补齐近 7 天的空缺天，前端图表直接渲染
   const daily: any[] = [];
   for (let i = 6; i >= 0; i--) {
     const key = fmtDate(todayStart.getTime() - i * 86400000);

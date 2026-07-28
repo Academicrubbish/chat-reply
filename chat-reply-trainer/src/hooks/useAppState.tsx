@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useRef, useEffect, useState, type Dispatch, type ReactNode } from 'react';
-import type { AppState, AppAction, ChatMessage, ModelOption, GenerationStep, GenerateMode } from '../types';
+import type { AppState, AppAction, ChatMessage, GenerationStep, GenerateMode } from '../types';
 import * as api from '../services/api';
 import { createSSEHandlers } from '../utils/sseHandlers';
 
@@ -358,9 +358,6 @@ interface AppContextValue {
   createNewSession: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
-  models: ModelOption[];
-  selectedProvider: string;
-  setSelectedProvider: (provider: string) => void;
   aiMode: GenerateMode;
   setAiMode: (mode: GenerateMode) => void;
   triggerAnalysis: (mode: 'advisor' | 'review') => Promise<void>;
@@ -378,8 +375,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const regenAbortRef = useRef<AbortController | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const [selectedProvider, setSelectedProvider] = useState('zhipu');
-  const [models, setModels] = useState<ModelOption[]>([]);
   const [aiMode, setAiMode] = useState<GenerateMode>('full');
 
   // Unified abort: stops all in-flight SSE streams
@@ -389,10 +384,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     regenAbortRef.current?.abort();
     regenAbortRef.current = null;
   };
-
-  useEffect(() => {
-    api.getModels().then(({ models }) => setModels(models)).catch(() => {});
-  }, []);
 
   // Cleanup: abort any in-flight SSE on unmount
   useEffect(() => () => { abortAllStreams(); }, []);
@@ -478,7 +469,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const ctrl = api.generateReplyStream(
       sessionId,
       lastHerMsg?.text || '',
-      selectedProvider,
       handlers.onEvent,
       handlers.onError,
       mode,
@@ -503,7 +493,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'TRIGGER_ANALYSIS', analysisMode: mode });
 
     const ctrl = api.analyzeStream(
-      sessionId, mode, selectedProvider,
+      sessionId, mode,
       (evt) => {
         if (evt.event === 'step') {
           dispatch({ type: 'ANALYSIS_STEP', step: evt.data.step });
@@ -541,7 +531,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const ctrl = api.diagnoseStream(
       targetId,
-      selectedProvider,
       (evt) => {
         if (evt.event === 'step') {
           dispatch({ type: 'DIAGNOSIS_STEP', step: evt.data.step === 'analyzing' ? 'analyzing' : evt.data.step === 'parsing' ? 'parsing' : 'generating' });
@@ -651,7 +640,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       state, dispatch, selectTarget, sendHerMessage, triggerAI,
       selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession,
-      models, selectedProvider, setSelectedProvider,
       aiMode, setAiMode, triggerAnalysis, diagnoseTarget, clearDiagnosis,
       regenAbortRef, abortAllStreams,
     }}>
