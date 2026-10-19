@@ -17,10 +17,63 @@ export interface ChatMessage {
   target_id: string;
   role: 'her' | 'me' | 'scene';
   text: string;
-  source: '手动输入' | 'AI建议' | '自定义回复' | '历史记录' | '场景补充';
+  source: '手动输入' | 'AI建议' | '自定义回复' | '历史记录' | '场景补充' | '微信同步';
+  source_type?: 'manual' | 'wechat' | string;
+  source_account_id?: string | null;
+  external_message_id?: string | null;
+  source_timestamp?: number | null;
+  content_hash?: string | null;
   strategy: string | null;
   session_id: string | null;
   created_at: number;
+}
+
+export interface WeChatReaderStatus {
+  installed: boolean;
+  ready: boolean;
+  mode: 'full' | 'preview' | 'unavailable';
+  message: string;
+  executable?: string;
+  version?: string;
+}
+
+export interface WeChatContact {
+  id: string;
+  name: string;
+  remark?: string;
+  type: 'private' | 'group' | 'unknown';
+  avatar?: string;
+}
+
+export interface WeChatBinding {
+  id: string;
+  target_id: string;
+  account_id: string;
+  contact_id: string;
+  contact_name: string;
+  last_synced_at: number | null;
+  last_cursor: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface WeChatSyncMessage {
+  externalId: string;
+  role: 'her' | 'me' | 'scene';
+  text: string;
+  timestamp: number;
+  contentHash: string;
+  senderName?: string;
+  messageType?: string;
+  duplicate: boolean;
+}
+
+export interface WeChatSyncPreview {
+  binding: WeChatBinding;
+  messages: WeChatSyncMessage[];
+  total: number;
+  importableCount: number;
+  duplicateCount: number;
 }
 
 export interface AISession {

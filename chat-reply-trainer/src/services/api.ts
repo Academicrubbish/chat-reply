@@ -1,4 +1,15 @@
-import type { ChatTarget, ChatMessage, AISession, GenerateResponse, ReplySelection, AnalysisRecord } from '../types';
+import type {
+  ChatTarget,
+  ChatMessage,
+  AISession,
+  GenerateResponse,
+  ReplySelection,
+  AnalysisRecord,
+  WeChatBinding,
+  WeChatContact,
+  WeChatReaderStatus,
+  WeChatSyncPreview,
+} from '../types';
 
 const BASE = '/api';
 
@@ -64,6 +75,43 @@ export const updateMessage = (msgId: string, text: string) =>
 
 export const deleteMessage = (msgId: string) =>
   request<{ success: boolean }>(`/messages/${msgId}`, { method: 'DELETE' });
+
+// WeChat read-only sync
+export const getWeChatStatus = () =>
+  request<WeChatReaderStatus>('/wechat/status');
+
+export const searchWeChatContacts = (query: string) =>
+  request<{ contacts: WeChatContact[] }>(`/wechat/contacts?${new URLSearchParams({ query }).toString()}`);
+
+export const getWeChatBinding = (targetId: string) =>
+  request<{ binding: WeChatBinding | null }>(`/targets/${targetId}/wechat-binding`);
+
+export const saveWeChatBinding = (
+  targetId: string,
+  contact: Pick<WeChatContact, 'id' | 'name'>,
+) =>
+  request<{ binding: WeChatBinding }>(`/targets/${targetId}/wechat-binding`, {
+    method: 'POST',
+    body: JSON.stringify({ contactId: contact.id, contactName: contact.name }),
+  });
+
+export interface WeChatSyncRange {
+  after?: number;
+  before?: number;
+  limit?: number;
+}
+
+export const previewWeChatSync = (targetId: string, range: WeChatSyncRange) =>
+  request<WeChatSyncPreview>(`/targets/${targetId}/wechat-sync/preview`, {
+    method: 'POST',
+    body: JSON.stringify(range),
+  });
+
+export const commitWeChatSync = (targetId: string, range: WeChatSyncRange) =>
+  request<{ count: number; duplicateCount: number; total: number }>(`/targets/${targetId}/wechat-sync/commit`, {
+    method: 'POST',
+    body: JSON.stringify(range),
+  });
 
 // Sessions
 export const getSessions = (targetId: string) =>

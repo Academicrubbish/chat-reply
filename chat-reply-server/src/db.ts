@@ -138,6 +138,11 @@ export interface ChatMessage {
   role: string;
   text: string;
   source: string;
+  source_type: string;
+  source_account_id: string | null;
+  external_message_id: string | null;
+  source_timestamp: number | null;
+  content_hash: string | null;
   strategy: string | null;
   session_id: string | null;
   created_at: number;
@@ -187,6 +192,11 @@ export async function initDb(): Promise<void> {
       role TEXT NOT NULL,
       text TEXT NOT NULL,
       source TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'manual',
+      source_account_id TEXT DEFAULT NULL,
+      external_message_id TEXT DEFAULT NULL,
+      source_timestamp INTEGER DEFAULT NULL,
+      content_hash TEXT DEFAULT NULL,
       strategy TEXT DEFAULT NULL,
       session_id TEXT DEFAULT NULL,
       created_at INTEGER NOT NULL,
@@ -259,6 +269,46 @@ export async function initDb(): Promise<void> {
   try {
     dbWrapper.exec(`ALTER TABLE ai_messages ADD COLUMN version INTEGER DEFAULT 1`);
   } catch {}
+
+  // Migrate: preserve external source identity and timestamps for incremental imports
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_messages ADD COLUMN source_type TEXT NOT NULL DEFAULT 'manual'`);
+  } catch {}
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_messages ADD COLUMN source_account_id TEXT DEFAULT NULL`);
+  } catch {}
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_messages ADD COLUMN external_message_id TEXT DEFAULT NULL`);
+  } catch {}
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_messages ADD COLUMN source_timestamp INTEGER DEFAULT NULL`);
+  } catch {}
+  try {
+    dbWrapper.exec(`ALTER TABLE chat_messages ADD COLUMN content_hash TEXT DEFAULT NULL`);
+  } catch {}
+  try {
+    dbWrapper.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_id ON chat_messages(target_id, source_type, external_message_id) WHERE external_message_id IS NOT NULL`);
+  } catch {}
+  try {
+    dbWrapper.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_content_hash ON chat_messages(target_id, source_type, content_hash) WHERE content_hash IS NOT NULL`);
+  } catch {}
+
+  dbWrapper.exec(`
+    CREATE TABLE IF NOT EXISTS wechat_bindings (
+      id TEXT PRIMARY KEY,
+      target_id TEXT NOT NULL UNIQUE,
+      account_id TEXT DEFAULT '',
+      contact_id TEXT NOT NULL,
+      contact_name TEXT DEFAULT '',
+      last_synced_at INTEGER DEFAULT NULL,
+      last_cursor TEXT DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (target_id) REFERENCES chat_targets(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_wechat_bindings_contact ON wechat_bindings(contact_id);
+  `);
 
   // Migrate: add context_summary to ai_sessions if missing
   try {

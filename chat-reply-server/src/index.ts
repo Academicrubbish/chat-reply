@@ -13,6 +13,13 @@ import { chatCompletion, chatCompletionStream, isLLMBillingError, getCurrentMode
 import knowledgeRoutes from './routes/knowledge';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import {
+  WeChatReaderError,
+  createWeChatContentHash,
+  getWeChatReaderStatus,
+  getWeChatTimeline,
+  searchWeChatContacts,
+} from './wechat-reader';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'chat-reply-dev-secret-change-in-prod';
 
@@ -163,6 +170,7 @@ app.delete('/api/targets/:id', (req: any, res: Response) => {
     db.prepare('DELETE FROM chat_evaluations WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM chat_diagnoses WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM user_warnings WHERE target_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM wechat_bindings WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM ai_sessions WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM chat_messages WHERE target_id = ?').run(req.params.id);
     db.prepare('DELETE FROM chat_targets WHERE id = ?').run(req.params.id);
@@ -180,6 +188,180 @@ function verifySessionOwnership(sessionId: string, userId: string): boolean {
   if (!session) return false;
   return verifyTargetOwnership(session.target_id, userId);
 }
+
+function getWeChatBinding(targetId: string): any | undefined {
+  return db.prepare('SELECT * FROM wechat_bindings WHERE target_id = ?').get(targetId) as any;
+}
+
+function parseWeChatRange(body: any): { after?: number; before?: number; limit: number } {
+  const after = Number(body?.after);
+  const before = Number(body?.before);
+  const limit = Math.min(Math.max(Number(body?.limit) || 500, 1), 1000);
+  const range: { after?: number; before?: number; limit: number } = { limit };
+  if (Number.isFinite(after) && after > 0) range.after = after;
+  if (Number.isFinite(before) && before > 0) range.before = before;
+  if (range.after !== undefined && range.before !== undefined && range.after > range.before) {
+    throw new Error('开始时间不能晚于结束时间');
+  }
+  return range;
+}
+
+function isImportedWeChatMessage(targetId: string, externalId: string, contentHash: string): boolean {
+  return !!db.prepare(`
+    SELECT id FROM chat_messages
+    WHERE target_id = ? AND source_type = 'wechat'
+      AND (external_message_id = ? OR content_hash = ?)
+    LIMIT 1
+  `).get(targetId, externalId, contentHash);
+}
+
+function sendWeChatError(res: Response, error: unknown): void {
+  if (error instanceof WeChatReaderError) {
+    const status = error.code === 'not_installed' || error.code === 'not_ready' ? 503 : 502;
+    res.status(status).json({ error: error.message, code: error.code });
+    return;
+  }
+  const validationMessage = error instanceof Error && error.message === '开始时间不能晚于结束时间'
+    ? error.message
+    : null;
+  res.status(validationMessage ? 400 : 500).json({
+    error: validationMessage || '微信同步失败，请稍后重试',
+  });
+}
+
+// ===== WeChat read-only sync =====
+app.get('/api/wechat/status', async (_req: Request, res: Response) => {
+  res.json(await getWeChatReaderStatus());
+});
+
+app.get('/api/wechat/contacts', async (req: Request, res: Response) => {
+  try {
+    const query = typeof req.query.query === 'string' ? req.query.query : '';
+    const contacts = await searchWeChatContacts(query, 20);
+    res.json({ contacts });
+  } catch (error) {
+    sendWeChatError(res, error);
+  }
+});
+
+app.get('/api/targets/:id/wechat-binding', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) {
+    res.status(404).json({ error: '聊天对象不存在' });
+    return;
+  }
+  res.json({ binding: getWeChatBinding(req.params.id) || null });
+});
+
+app.post('/api/targets/:id/wechat-binding', (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) {
+    res.status(404).json({ error: '聊天对象不存在' });
+    return;
+  }
+  const contactId = typeof req.body.contactId === 'string' ? req.body.contactId.trim() : '';
+  const contactName = typeof req.body.contactName === 'string' ? req.body.contactName.trim() : '';
+  const accountId = typeof req.body.accountId === 'string' ? req.body.accountId.trim() : '';
+  if (!contactId || contactId.length > 300) {
+    res.status(400).json({ error: '请选择有效的微信联系人' });
+    return;
+  }
+  const existing = getWeChatBinding(req.params.id);
+  const now = Date.now();
+  if (existing) {
+    db.prepare(`
+      UPDATE wechat_bindings
+      SET account_id = ?, contact_id = ?, contact_name = ?, last_cursor = '', updated_at = ?
+      WHERE target_id = ?
+    `).run(accountId, contactId, contactName, now, req.params.id);
+  } else {
+    db.prepare(`
+      INSERT INTO wechat_bindings
+        (id, target_id, account_id, contact_id, contact_name, last_synced_at, last_cursor, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, NULL, '', ?, ?)
+    `).run(uuid(), req.params.id, accountId, contactId, contactName, now, now);
+  }
+  res.json({ binding: getWeChatBinding(req.params.id) });
+});
+
+app.post('/api/targets/:id/wechat-sync/preview', async (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) {
+    res.status(404).json({ error: '聊天对象不存在' });
+    return;
+  }
+  try {
+    const binding = getWeChatBinding(req.params.id);
+    if (!binding) {
+      res.status(400).json({ error: '请先绑定微信联系人' });
+      return;
+    }
+    const range = parseWeChatRange(req.body);
+    const timeline = await getWeChatTimeline(binding.contact_id, range);
+    const messages = timeline.map(message => ({
+      ...message,
+      duplicate: isImportedWeChatMessage(req.params.id, message.externalId, message.contentHash),
+    }));
+    const duplicateCount = messages.filter(message => message.duplicate).length;
+    res.json({
+      binding,
+      messages,
+      total: messages.length,
+      importableCount: messages.length - duplicateCount,
+      duplicateCount,
+    });
+  } catch (error) {
+    sendWeChatError(res, error);
+  }
+});
+
+app.post('/api/targets/:id/wechat-sync/commit', async (req: any, res: Response) => {
+  if (!verifyTargetOwnership(req.params.id, req.user.userId)) {
+    res.status(404).json({ error: '聊天对象不存在' });
+    return;
+  }
+  try {
+    const binding = getWeChatBinding(req.params.id);
+    if (!binding) {
+      res.status(400).json({ error: '请先绑定微信联系人' });
+      return;
+    }
+    const range = parseWeChatRange(req.body);
+    const timeline = await getWeChatTimeline(binding.contact_id, range);
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO chat_messages
+        (id, target_id, role, text, source, source_type, source_account_id, external_message_id,
+         source_timestamp, content_hash, strategy, session_id, created_at)
+      VALUES (?, ?, ?, ?, '微信同步', 'wechat', ?, ?, ?, ?, NULL, NULL, ?)
+    `);
+    let importedCount = 0;
+    db.transaction(() => {
+      for (const message of timeline) {
+        const contentHash = createWeChatContentHash(message.role, message.text, message.timestamp);
+        const result = insert.run(
+          uuid(),
+          req.params.id,
+          message.role,
+          message.text.trim(),
+          binding.account_id || null,
+          message.externalId,
+          message.timestamp,
+          contentHash,
+          message.timestamp,
+        );
+        if (result.changes > 0) importedCount++;
+      }
+      const latest = timeline[timeline.length - 1];
+      db.prepare(`
+        UPDATE wechat_bindings SET last_synced_at = ?, last_cursor = ?, updated_at = ? WHERE target_id = ?
+      `).run(Date.now(), latest?.externalId || binding.last_cursor || '', Date.now(), req.params.id);
+    })();
+    res.status(201).json({
+      count: importedCount,
+      duplicateCount: timeline.length - importedCount,
+      total: timeline.length,
+    });
+  } catch (error) {
+    sendWeChatError(res, error);
+  }
+});
 
 app.get('/api/targets/:id/messages', (req: any, res: Response) => {
   if (!verifyTargetOwnership(req.params.id, req.user.userId)) { res.status(404).json({ error: '聊天对象不存在' }); return; }

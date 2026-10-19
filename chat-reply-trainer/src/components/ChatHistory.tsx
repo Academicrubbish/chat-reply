@@ -3,6 +3,7 @@ import { Empty, Button, Input, Space, Alert } from "antd";
 import {
   EnvironmentOutlined,
   FileAddOutlined,
+  CloudDownloadOutlined,
   CheckOutlined,
   CloseOutlined,
 } from "@ant-design/icons";
@@ -11,6 +12,7 @@ import type { ParsedMessage, NicknameMap } from "../utils/parseChat";
 import { parseChatWithMeta } from "../utils/parseChat";
 import ChatBubble from "./ChatBubble";
 import ChatImportPreview from "./ChatImportPreview";
+import WeChatSyncPanel from "./WeChatSyncPanel";
 
 interface ChatHistoryProps {
   isVisible?: boolean;
@@ -21,9 +23,10 @@ interface ChatHistoryProps {
   onDeleteMessage?: (id: string) => void;
   onAddScene?: (text: string) => Promise<void>;
   onImportMessages?: (messages: ParsedMessage[]) => Promise<void>;
+  onWeChatImported?: () => Promise<void> | void;
 }
 
-type InsertMode = "none" | "scene" | "import";
+type InsertMode = "none" | "scene" | "import" | "wechat";
 
 const ChatHistory: React.FC<ChatHistoryProps> = ({
   messages,
@@ -33,6 +36,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   onDeleteMessage,
   onAddScene,
   onImportMessages,
+  onWeChatImported,
   isVisible = true,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -340,9 +344,19 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
         </div>
       )}
 
+      {insertMode === "wechat" && onWeChatImported && (
+        <WeChatSyncPanel
+          key={targetId}
+          targetId={targetId}
+          targetName={targetName}
+          onClose={() => setInsertMode("none")}
+          onImported={onWeChatImported}
+        />
+      )}
+
       <div ref={bottomRef} />
 
-      {insertMode === "none" && (onAddScene || onImportMessages) && (
+      {insertMode === "none" && (onAddScene || onImportMessages || onWeChatImported) && (
         <div className="self-center flex gap-2" style={{ padding: "4px 0" }}>
           {onAddScene && (
             <Button
@@ -362,6 +376,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
               onClick={() => setInsertMode("import")}
             >
               补充记录
+            </Button>
+          )}
+          {onWeChatImported && (
+            <Button
+              size="small"
+              type="dashed"
+              icon={<CloudDownloadOutlined />}
+              onClick={() => setInsertMode("wechat")}
+            >
+              从微信同步
             </Button>
           )}
         </div>

@@ -279,6 +279,11 @@ function AppContent() {
     selectTarget(state.currentTargetId);
   };
 
+  const handleWeChatImported = async () => {
+    if (!state.currentTargetId) return;
+    await selectTarget(state.currentTargetId);
+  };
+
   const logout = () => {
     localStorage.removeItem("token");
     window.location.reload();
@@ -469,6 +474,7 @@ function AppContent() {
                 onDeleteMessage={handleDeleteMessage}
                 onAddScene={handleAddScene}
                 onImportMessages={handleImportMessages}
+                onWeChatImported={handleWeChatImported}
               />
             </ErrorBoundary>
             {state.phase === "her_sent" && (

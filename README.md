@@ -149,6 +149,7 @@ Chat Reply 不是随便调个 AI 让它帮你回消息。它的核心是一套**
 
 ### 💾 实用工具
 - 📋 粘贴微信聊天记录自动解析导入
+- 🔄 通过本地 Reader 只读预览、去重并增量同步微信记录
 - 📊 好感度变化趋势图
 - 🔄 回复版本管理（多次生成可对比）
 - 📱 移动端适配
@@ -196,6 +197,16 @@ ZHIPU_MODEL=glm-5.1
 ```
 
 > 获取 API Key：[open.bigmodel.cn](https://open.bigmodel.cn) · 仅支持智谱 GLM（OpenAI 兼容协议）
+
+### 可选：微信只读同步
+
+「从微信同步」依赖本机的 `rion-wechat-cli` Reader。本项目只调用 Reader 的只读查询命令，不会自动获取密钥、修改微信数据或发送消息。Reader 配置完成后，可在 `chat-reply-server/.env` 中指定其路径：
+
+```env
+WECHAT_READER_BIN=/absolute/path/to/rion-wechat-cli
+```
+
+页面会先运行就绪检查，只有 Reader 报告完整历史记录可读时，才会开放联系人绑定和导入操作。
 
 ### 试试效果
 
