@@ -351,7 +351,7 @@ interface AppContextValue {
   state: AppState;
   dispatch: Dispatch<AppAction>;
   selectTarget: (id: string) => Promise<void>;
-  sendHerMessage: (text: string) => void;
+  sendHerMessage: (text: string) => Promise<void>;
   triggerAI: () => Promise<void>;
   selectReplyAction: (reply: { id: number; text: string; strategy: string }, aiMessageId?: string) => Promise<void>;
   sendCustomReply: (text: string) => Promise<void>;
@@ -408,10 +408,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     api.getDiagnoses(id).then(h => dispatch({ type: 'SET_DIAGNOSIS_HISTORY', history: h })).catch(() => {});
   };
 
-  const sendHerMessage = (text: string) => {
+  const sendHerMessage = async (text: string) => {
     const targetId = stateRef.current.currentTargetId;
     if (!targetId) return;
-    api.addMessage(targetId, {
+    return api.addMessage(targetId, {
       role: 'her',
       text,
       source: '手动输入',
@@ -428,6 +428,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }).catch(err => {
       dispatch({ type: 'SET_ERROR', error: '消息发送失败: ' + (err.message || '网络错误') });
+      throw err;
     });
   };
 
@@ -583,6 +584,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await loadSessionAiMessages(s.currentSessionId, dispatch);
     } catch (err: any) {
       dispatch({ type: 'SET_ERROR', error: err.message });
+      throw err;
     }
   };
 

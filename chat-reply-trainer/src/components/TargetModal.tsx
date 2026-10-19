@@ -1,15 +1,15 @@
-import { useEffect, useState, useRef } from 'react';
-import { Modal, Form, Input, Radio, Space, Row, Col, Alert } from 'antd';
-import type { ChatTarget } from '../types';
-import { parseChatWithMeta } from '../utils/parseChat';
-import type { NicknameMap } from '../utils/parseChat';
-import ChatImportPreview from './ChatImportPreview';
+import { useEffect, useState, useRef } from "react";
+import { Modal, Form, Input, Radio, Space, Row, Col, Alert } from "antd";
+import type { ChatTarget } from "../types";
+import { parseChatWithMeta } from "../utils/parseChat";
+import type { NicknameMap } from "../utils/parseChat";
+import ChatImportPreview from "./ChatImportPreview";
 
 interface TargetModalProps {
   open: boolean;
   target?: ChatTarget | null;
   onClose: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: any) => void | Promise<void>;
 }
 
 interface FormValues {
@@ -18,25 +18,36 @@ interface FormValues {
   persona: string;
   hobbies: string;
   recent_chats: string;
-  tone_level: 'aggressive' | 'moderate' | 'conservative';
-  goal_intent: 'practice' | 'pursuing' | 'friendship';
+  tone_level: "aggressive" | "moderate" | "conservative";
+  goal_intent: "practice" | "pursuing" | "friendship";
   forbidden_topics: string;
 }
 
-export default function TargetModal({ open, target, onClose, onSave }: TargetModalProps) {
+export default function TargetModal({
+  open,
+  target,
+  onClose,
+  onSave,
+}: TargetModalProps) {
   const [form] = Form.useForm<FormValues>();
   const isEditing = !!target;
-  const [parsedResult, setParsedResult] = useState<{ messages: any[]; warnings: string[]; nicknames?: string[] } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [parsedResult, setParsedResult] = useState<{
+    messages: any[];
+    warnings: string[];
+    nicknames?: string[];
+  } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const [wechatNicknames, setWechatNicknames] = useState<string[]>([]);
-  const [herNickname, setHerNickname] = useState<string>('');
-  const [meNickname, setMeNickname] = useState<string>('');
+  const [herNickname, setHerNickname] = useState<string>("");
+  const [meNickname, setMeNickname] = useState<string>("");
   const [insertSceneIndex, setInsertSceneIndex] = useState<number | null>(null);
-  const [insertSceneText, setInsertSceneText] = useState('');
+  const [insertSceneText, setInsertSceneText] = useState("");
 
-  const rawChatText = Form.useWatch('recent_chats', form);
-  const nameValue = Form.useWatch('name', form);
+  const rawChatText = Form.useWatch("recent_chats", form);
+  const nameValue = Form.useWatch("name", form);
 
   useEffect(() => {
     if (open && target) {
@@ -54,8 +65,8 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
       form.resetFields();
       setParsedResult(null);
       setWechatNicknames([]);
-      setHerNickname('');
-      setMeNickname('');
+      setHerNickname("");
+      setMeNickname("");
     }
   }, [open, target, form]);
 
@@ -66,12 +77,18 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
         const result = parseChatWithMeta(rawChatText, nameValue);
         setParsedResult(result);
 
-        if (result.nicknames && result.nicknames.length >= 2 && result.messages.length === 0) {
+        if (
+          result.nicknames &&
+          result.nicknames.length >= 2 &&
+          result.messages.length === 0
+        ) {
           setWechatNicknames(result.nicknames);
-          const matched = result.nicknames.find(n => nameValue && n.includes(nameValue));
+          const matched = result.nicknames.find(
+            (n) => nameValue && n.includes(nameValue),
+          );
           if (matched) {
             setHerNickname(matched);
-            setMeNickname(result.nicknames.find(n => n !== matched) || '');
+            setMeNickname(result.nicknames.find((n) => n !== matched) || "");
           } else {
             setHerNickname(result.nicknames[0]);
             setMeNickname(result.nicknames[1]);
@@ -84,7 +101,9 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
         setWechatNicknames([]);
       }
     }, 300);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [rawChatText, nameValue]);
 
   const handleNicknameConfirm = () => {
@@ -98,43 +117,85 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
     const text = insertSceneText.trim();
     if (!text || !parsedResult) return;
     const msgs = [...parsedResult.messages];
-    msgs.splice(index, 0, { role: 'scene', text });
-    const lines = msgs.map((m: any) => m.role === 'scene' ? `场景：${m.text}` : m.role === 'her' ? `她：${m.text}` : `我：${m.text}`);
-    form.setFieldValue('recent_chats', lines.join('\n'));
+    msgs.splice(index, 0, { role: "scene", text });
+    const lines = msgs.map((m: any) =>
+      m.role === "scene"
+        ? `场景：${m.text}`
+        : m.role === "her"
+          ? `她：${m.text}`
+          : `我：${m.text}`,
+    );
+    form.setFieldValue("recent_chats", lines.join("\n"));
     setInsertSceneIndex(null);
-    setInsertSceneText('');
+    setInsertSceneText("");
   };
 
-  function handleOk() {
-    form.validateFields().then(values => {
-      const data: any = { ...values };
-      if (wechatNicknames.length >= 2 && herNickname && meNickname) {
-        data.nicknameMap = { herNick: herNickname, meNick: meNickname };
-      }
-      onSave(data);
-    });
+  async function handleOk() {
+    if (saving) return;
+    let values: FormValues;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    try {
+      const data = {
+        ...values,
+        ...(wechatNicknames.length >= 2 && herNickname && meNickname
+          ? { nicknameMap: { herNick: herNickname, meNick: meNickname } }
+          : {}),
+      };
+      await onSave(data);
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : "保存失败，请稍后重试",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <Modal
-      title={isEditing ? `编辑人设 - ${target!.name}` : '新建聊天对象'}
+      title={isEditing ? `关于 ${target!.name}` : "新建聊天对象"}
       open={open}
-      onCancel={onClose}
+      onCancel={() => {
+        if (!saving) {
+          setSaveError("");
+          onClose();
+        }
+      }}
+      confirmLoading={saving}
+      cancelButtonProps={{ disabled: saving }}
       onOk={handleOk}
       okText="保存"
       cancelText="取消"
       width="min(95vw, 960px)"
       destroyOnHidden
     >
+      {saveError && (
+        <Alert
+          type="error"
+          showIcon
+          title={saveError}
+          style={{ marginTop: 16 }}
+        />
+      )}
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ tone_level: 'moderate', goal_intent: 'practice' }}
+        initialValues={{ tone_level: "moderate", goal_intent: "practice" }}
         style={{ marginTop: 16 }}
       >
-        <Row gutter={32}>
-          <Col span={12}>
-            <Form.Item label="名字" name="name" rules={[{ required: true, message: '请输入名字' }]}>
+        <Row gutter={{ xs: 0, lg: 32 }}>
+          <Col xs={24} lg={12}>
+            <Form.Item
+              label="名字"
+              name="name"
+              rules={[{ required: true, message: "请输入名字" }]}
+            >
               <Input />
             </Form.Item>
             <Form.Item label="兴趣爱好" name="hobbies">
@@ -148,7 +209,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
             </Form.Item>
             <Form.Item label="语气风格" name="tone_level">
               <Radio.Group>
-                <Space>
+                <Space wrap>
                   <Radio value="aggressive">进攻型</Radio>
                   <Radio value="moderate">适中</Radio>
                   <Radio value="conservative">保守型</Radio>
@@ -157,7 +218,7 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
             </Form.Item>
             <Form.Item label="目标意图" name="goal_intent">
               <Radio.Group>
-                <Space>
+                <Space wrap>
                   <Radio value="practice">练习聊天</Radio>
                   <Radio value="pursuing">追求中</Radio>
                   <Radio value="friendship">交朋友</Radio>
@@ -169,34 +230,54 @@ export default function TargetModal({ open, target, onClose, onSave }: TargetMod
             </Form.Item>
           </Col>
 
-          <Col span={12}>
+          <Col xs={24} lg={12}>
             {isEditing ? (
               <Alert
                 type="info"
                 showIcon
                 style={{ marginTop: 30 }}
-                title="聊天记录请在右侧聊天面板中管理"
+                title="聊天记录请在「聊天记录」区域管理"
                 description="支持手动输入、批量导入、编辑和删除消息"
               />
             ) : (
               <>
                 <Form.Item label="最近聊天内容" name="recent_chats">
-                  <Input.TextArea rows={8} maxLength={30000} showCount placeholder={"她：你在干嘛\n我：在加班呢\n场景：过了两天没联系\n她：最近忙吗"} />
+                  <Input.TextArea
+                    rows={8}
+                    maxLength={30000}
+                    showCount
+                    placeholder={
+                      "她：你在干嘛\n我：在加班呢\n场景：过了两天没联系\n她：最近忙吗"
+                    }
+                  />
                 </Form.Item>
-                <div style={{ fontSize: 11, color: '#999', marginTop: -8, marginBottom: 12 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "#999",
+                    marginTop: -8,
+                    marginBottom: 12,
+                  }}
+                >
                   支持格式：
-                  <span style={{ color: '#f48fb1' }}>她：xxx</span> /
-                  <span style={{ color: '#66bb6a' }}>我：xxx</span> /
-                  <span style={{ color: '#8c6d1f' }}>场景：xxx</span> ← 插入背景说明 /
-                  微信聊天记录导出
+                  <span style={{ color: "#f48fb1" }}>她：xxx</span> /
+                  <span style={{ color: "#66bb6a" }}>我：xxx</span> /
+                  <span style={{ color: "#8c6d1f" }}>场景：xxx</span> ←
+                  插入背景说明 / 微信聊天记录导出
                 </div>
                 <Alert
                   type="info"
                   showIcon
-                  style={{ fontSize: 11, marginBottom: 12, padding: '6px 10px' }}
+                  style={{
+                    fontSize: 11,
+                    marginBottom: 12,
+                    padding: "6px 10px",
+                  }}
                   title={
                     <span>
-                      <b>微信记录导入：</b>在微信中长按消息 → 多选 → 选择最右侧邮件转发 → 进入发送页 → 长按该条邮件 → 全选复制 → 粘贴到此处。（无需发送真实邮件）
+                      <b>微信记录导入：</b>在微信中长按消息 → 多选 →
+                      选择最右侧邮件转发 → 进入发送页 → 长按该条邮件 → 全选复制
+                      → 粘贴到此处。（无需发送真实邮件）
                       系统会自动识别参与者，你只需选择谁是「她」谁是「我」即可。
                     </span>
                   }

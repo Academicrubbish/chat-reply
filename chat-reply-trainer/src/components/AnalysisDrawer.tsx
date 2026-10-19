@@ -777,7 +777,12 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
                     <div style={{ marginTop: 16, color: '#999' }}>军师分析中...</div>
                   </div>
                 ) : isAdvisorResult ? (
-                  <AdvisorView data={advisorResult} />
+                  <div>
+                    <AdvisorView data={advisorResult} />
+                    <div style={{ marginTop: 16, textAlign: 'right' }}>
+                      <Button onClick={() => onTriggerAnalysis('advisor')}>重新分析</Button>
+                    </div>
+                  </div>
                 ) : (
                   <Empty description="暂无军师分析">
                     <Button onClick={() => onTriggerAnalysis('advisor')}>开始分析</Button>

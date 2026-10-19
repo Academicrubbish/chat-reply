@@ -1,59 +1,95 @@
-import { useEffect, useRef, useState } from 'react';
-import { Button, message, Segmented, Skeleton } from 'antd';
-import { LogoutOutlined, CrownOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { AppProvider, useAppState } from './hooks/useAppState';
-import * as api from './services/api';
-import { parseChatWithMeta } from './utils/parseChat';
-import type { ParsedMessage } from './utils/parseChat';
-import { createSSEHandlers } from './utils/sseHandlers';
-import { shouldStartTour, startTour } from './utils/tourGuide';
-import ErrorBoundary from './components/ErrorBoundary';
-import SetupPage from './components/SetupPage';
-import LoginPage from './components/LoginPage';
-import SignUpPage from './components/SignUpPage';
-import OnboardingPage from './components/OnboardingPage';
-import AdminPage from './components/AdminPage';
-import TargetSelector from './components/TargetSelector';
-import TargetModal from './components/TargetModal';
-import Toolbar from './components/Toolbar';
-import AttractionBar from './components/AttractionBar';
-import RoundTimeline from './components/RoundTimeline';
-import ChatHeader from './components/ChatHeader';
-import ChatHistory from './components/ChatHistory';
-import MessageInput from './components/MessageInput';
-import { AnalysisSteps, AnalysisModal, ReviewModal } from './components/AnalysisDrawer';
-import { Card } from 'antd';
+import { useEffect, useRef, useState } from "react";
+import { Button, message, Skeleton } from "antd";
+import {
+  LogoutOutlined,
+  CrownOutlined,
+  PlusOutlined,
+  MessageOutlined,
+  BulbOutlined,
+  ArrowRightOutlined,
+} from "@ant-design/icons";
+import { AppProvider, useAppState } from "./hooks/useAppState";
+import * as api from "./services/api";
+import { parseChatWithMeta } from "./utils/parseChat";
+import type { ParsedMessage } from "./utils/parseChat";
+import { createSSEHandlers } from "./utils/sseHandlers";
+import { shouldStartTour, startTour } from "./utils/tourGuide";
+import ErrorBoundary from "./components/ErrorBoundary";
+import Brand from "./components/Brand";
+import SetupPage from "./components/SetupPage";
+import LoginPage from "./components/LoginPage";
+import SignUpPage from "./components/SignUpPage";
+import OnboardingPage from "./components/OnboardingPage";
+import AdminPage from "./components/AdminPage";
+import TargetSelector from "./components/TargetSelector";
+import TargetModal from "./components/TargetModal";
+import Toolbar from "./components/Toolbar";
+import AttractionBar from "./components/AttractionBar";
+import RoundTimeline from "./components/RoundTimeline";
+import ChatHeader from "./components/ChatHeader";
+import ChatHistory from "./components/ChatHistory";
+import MessageInput from "./components/MessageInput";
+import {
+  AnalysisSteps,
+  AnalysisModal,
+  ReviewModal,
+} from "./components/AnalysisDrawer";
+import { Card } from "antd";
 
 function AppContent() {
-  const { state, dispatch, selectTarget, sendHerMessage, triggerAI, selectReplyAction, sendCustomReply, createNewSession, switchSession, deleteSession, aiMode, setAiMode, triggerAnalysis, diagnoseTarget, regenAbortRef, abortAllStreams } = useAppState();
-  const currentTarget = state.targets.find(t => t.id === state.currentTargetId) || null;
-  const [mobileTab, setMobileTab] = useState<'chat' | 'ai'>('chat');
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const {
+    state,
+    dispatch,
+    selectTarget,
+    sendHerMessage,
+    triggerAI,
+    selectReplyAction,
+    sendCustomReply,
+    createNewSession,
+    switchSession,
+    deleteSession,
+    aiMode,
+    setAiMode,
+    triggerAnalysis,
+    diagnoseTarget,
+    regenAbortRef,
+    abortAllStreams,
+  } = useAppState();
+  const currentTarget =
+    state.targets.find((t) => t.id === state.currentTargetId) || null;
+  const [mobileTab, setMobileTab] = useState<"chat" | "ai">("chat");
+  const [isMobile, setIsMobile] = useState(
+    () => window.matchMedia("(max-width: 900px)").matches,
+  );
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [targetsLoading, setTargetsLoading] = useState(true);
+  const [targetLoadError, setTargetLoadError] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Auto-open diagnosis modal when a new diagnosis is generated during AI assist
+  // Keep generated diagnosis available without interrupting reply selection.
   useEffect(() => {
     if (state.diagnosisJustGenerated) {
-      setAnalysisModalOpen(true);
-      dispatch({ type: 'DISMISS_DIAGNOSIS' });
+      dispatch({ type: "DISMISS_DIAGNOSIS" });
     }
   }, [state.diagnosisJustGenerated]);
 
   // Check admin status on mount
   useEffect(() => {
-    api.checkAdmin().then(r => setIsAdmin(r.isAdmin)).catch(() => {});
+    api
+      .checkAdmin()
+      .then((r) => setIsAdmin(r.isAdmin))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
-    const mql = window.matchMedia('(max-width: 767px)');
+    const mql = window.matchMedia("(max-width: 900px)");
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
   }, []);
 
   // Auto-start guided tour only for newly registered users
@@ -66,12 +102,19 @@ function AppContent() {
 
   // Load targets on mount
   useEffect(() => {
-    api.getTargets().then(targets => {
-      dispatch({ type: 'SET_TARGETS', targets });
-      if (targets.length > 0) {
-        selectTarget(targets[0].id);
-      }
-    });
+    api
+      .getTargets()
+      .then((targets) => {
+        dispatch({ type: "SET_TARGETS", targets });
+        if (targets.length > 0) {
+          selectTarget(targets[0].id);
+        }
+      })
+      .catch(() => {
+        setTargetLoadError(true);
+        dispatch({ type: "SET_ERROR", error: "无法加载聊天对象，请刷新重试" });
+      })
+      .finally(() => setTargetsLoading(false));
   }, []);
 
   const [messageApi, contextHolder] = message.useMessage();
@@ -90,43 +133,58 @@ function AppContent() {
   const handleSaveTarget = async (data: any) => {
     if (state.editingTarget) {
       const updated = await api.updateTarget(state.editingTarget.id, data);
-      dispatch({ type: 'UPDATE_TARGET', target: updated });
+      dispatch({ type: "UPDATE_TARGET", target: updated });
       // 只在非生成状态下刷新完整目标数据，避免中断正在进行的 AI 生成
-      if (state.currentTargetId === updated.id && state.phase !== 'generating') {
+      if (
+        state.currentTargetId === updated.id &&
+        state.phase !== "generating"
+      ) {
         selectTarget(updated.id);
       }
     } else {
       const target = await api.createTarget(data);
-      dispatch({ type: 'ADD_TARGET', target });
+      dispatch({ type: "ADD_TARGET", target });
 
       // Parse and import chat messages from recent_chats
       if (data.recent_chats?.trim()) {
-        const { messages } = parseChatWithMeta(data.recent_chats, data.name, data.nicknameMap);
+        const { messages } = parseChatWithMeta(
+          data.recent_chats,
+          data.name,
+          data.nicknameMap,
+        );
         if (messages.length > 0) {
-          await api.addMessagesBatch(target.id, messages.map(msg => ({
-            role: msg.role,
-            text: msg.text,
-            source: '历史记录',
-          })));
+          await api.addMessagesBatch(
+            target.id,
+            messages.map((msg) => ({
+              role: msg.role,
+              text: msg.text,
+              source: "历史记录",
+            })),
+          );
         }
       }
 
-      dispatch({ type: 'CLOSE_MODAL' });
+      dispatch({ type: "CLOSE_MODAL" });
       selectTarget(target.id);
       return;
     }
-    dispatch({ type: 'CLOSE_MODAL' });
+    dispatch({ type: "CLOSE_MODAL" });
   };
 
   const handleDeleteTarget = async (id: string) => {
     await api.deleteTarget(id);
     const targets = await api.getTargets();
-    dispatch({ type: 'SET_TARGETS', targets });
+    dispatch({ type: "SET_TARGETS", targets });
     if (state.currentTargetId === id) {
       if (targets.length > 0) {
         selectTarget(targets[0].id);
       } else {
-        dispatch({ type: 'SELECT_TARGET', targetId: '', messages: [], sessions: [] });
+        dispatch({
+          type: "SELECT_TARGET",
+          targetId: "",
+          messages: [],
+          sessions: [],
+        });
       }
     }
   };
@@ -137,28 +195,37 @@ function AppContent() {
     selectTarget(state.currentTargetId);
   };
 
-  const handleFeedback = async (replyId: number, rating: 'thumbs_up' | 'thumbs_down') => {
+  const handleFeedback = async (
+    replyId: number,
+    rating: "thumbs_up" | "thumbs_down",
+  ) => {
     if (!state.currentSessionId) return;
     await api.sendFeedback(state.currentSessionId, replyId, rating);
   };
 
   const handleRegenerate = async () => {
     const s = stateRef.current;
-    if (!s.currentSessionId || s.phase === 'generating') return;
-    dispatch({ type: 'TRIGGER_REGENERATE' });
+    if (!s.currentSessionId || s.phase === "generating") return;
+    dispatch({ type: "TRIGGER_REGENERATE" });
 
     const currentRoundId = s.replyVersions[s.activeVersionIndex]?.roundId;
-    const mode = aiMode === 'quick' ? 'quick' : 'full';
+    const mode = aiMode === "quick" ? "quick" : "full";
 
     const handlers = createSSEHandlers(dispatch, stateRef, {
-      tag: 'Regen SSE',
+      tag: "Regen SSE",
       extra: {
-        delta: () => { dispatch({ type: 'ADVANCE_REGEN_STEP' }); },
+        delta: () => {
+          dispatch({ type: "ADVANCE_REGEN_STEP" });
+        },
       },
       onDone: () => {
         if (stateRef.current.currentTargetId) {
-          api.getSessions(stateRef.current.currentTargetId).then(sessions => {
-            dispatch({ type: 'UPDATE_SESSIONS', sessions, currentSessionId: stateRef.current.currentSessionId });
+          api.getSessions(stateRef.current.currentTargetId).then((sessions) => {
+            dispatch({
+              type: "UPDATE_SESSIONS",
+              sessions,
+              currentSessionId: stateRef.current.currentSessionId,
+            });
           });
         }
       },
@@ -176,236 +243,398 @@ function AppContent() {
 
   const handleCancelGeneration = () => {
     abortAllStreams();
-    dispatch({ type: 'CANCEL_GENERATION' });
+    dispatch({ type: "CANCEL_GENERATION" });
   };
 
   const handleEditMessage = async (id: string, text: string) => {
     await api.updateMessage(id, text);
-    dispatch({ type: 'EDIT_MESSAGE', id, text });
+    dispatch({ type: "EDIT_MESSAGE", id, text });
   };
 
   const handleDeleteMessage = async (id: string) => {
     await api.deleteMessage(id);
-    dispatch({ type: 'DELETE_MESSAGE', id });
+    dispatch({ type: "DELETE_MESSAGE", id });
   };
 
   const handleAddScene = async (text: string) => {
     if (!state.currentTargetId) return;
     const msg = await api.addMessage(state.currentTargetId, {
-      role: 'scene', text, source: '场景补充',
+      role: "scene",
+      text,
+      source: "场景补充",
     });
-    dispatch({ type: 'SEND_HER_MESSAGE', message: msg });
+    dispatch({ type: "SEND_HER_MESSAGE", message: msg });
   };
 
   const handleImportMessages = async (parsed: ParsedMessage[]) => {
     if (!state.currentTargetId || parsed.length === 0) return;
-    await api.addMessagesBatch(state.currentTargetId, parsed.map(msg => ({
-      role: msg.role,
-      text: msg.text,
-      source: msg.role === 'scene' ? '场景补充' : '历史记录',
-    })));
+    await api.addMessagesBatch(
+      state.currentTargetId,
+      parsed.map((msg) => ({
+        role: msg.role,
+        text: msg.text,
+        source: msg.role === "scene" ? "场景补充" : "历史记录",
+      })),
+    );
     selectTarget(state.currentTargetId);
   };
 
-  // Empty state — onboarding page
-  if (state.targets.length === 0 && !state.currentTargetId) {
-    return (
-      <>
-        <div className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 shrink-0">
-          <div className="w-9 h-9 bg-linear-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center text-white"><ThunderboltOutlined /></div>
-          <div className="flex flex-col">
-            <h1>聊天模拟器</h1>
-            <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>
-          </div>
-        </div>
-        <OnboardingPage onStart={() => dispatch({ type: 'OPEN_MODAL' })} isMobile={isMobile} />
-        <TargetModal
-          open={state.modalOpen}
-          target={state.editingTarget}
-          onClose={() => dispatch({ type: 'CLOSE_MODAL' })}
-          onSave={handleSaveTarget}
-        />
-      </>
-    );
-  }
-
-  return (
-    <>
-      {contextHolder}
-
-      {/* Top Bar */}
-      <div className="h-14 bg-white border-b border-border flex items-center shrink-0" style={{ padding: isMobile ? '0 12px' : '0 24px', gap: isMobile ? 8 : 16 }}>
-        <div className="w-9 h-9 bg-linear-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center text-white"><ThunderboltOutlined /></div>
-        <div className="flex flex-col">
-          <h1>聊天模拟器</h1>
-          {!isMobile && <div className="text-xs text-[#888]">Chat Simulator · AI Agent 辅助沟通</div>}
-        </div>
-        <div className="flex-1" />
+  const logout = () => {
+    localStorage.removeItem("token");
+    window.location.reload();
+  };
+  const header = (
+    <header className="workspace-header">
+      <div className="compact-brand">
+        <Brand />
+      </div>
+      <div className="workspace-breadcrumb">
+        <span>我的空间</span>
+        <span>/</span>
+        <strong>对话工作台</strong>
+      </div>
+      <div className="header-actions">
         <TargetSelector
           targets={state.targets}
           currentId={state.currentTargetId}
           onSelect={selectTarget}
-          onCreateNew={() => dispatch({ type: 'OPEN_MODAL' })}
+          onCreateNew={() => dispatch({ type: "OPEN_MODAL" })}
           onDelete={handleDeleteTarget}
         />
         {isAdmin && (
           <Button
-            size="small"
+            aria-label="管理后台"
             icon={<CrownOutlined />}
             onClick={() => setShowAdmin(true)}
-            style={{ color: '#fa8c16', borderColor: '#ffd591' }}
-          >
-            {isMobile ? '' : '管理'}
-          </Button>
+          />
         )}
         <Button
-          size="small"
+          type="text"
+          aria-label="退出登录"
           icon={<LogoutOutlined />}
-          onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
-        >
-          {isMobile ? '' : '退出'}
+          onClick={logout}
+        />
+      </div>
+    </header>
+  );
+
+  if (targetsLoading)
+    return (
+      <div className="workspace-loading">
+        <Brand />
+        <Skeleton active paragraph={{ rows: 5 }} />
+      </div>
+    );
+  if (targetLoadError)
+    return (
+      <main className="workspace-loading">
+        <Brand />
+        <h1 style={{ marginTop: 32 }}>暂时无法加载你的空间</h1>
+        <p style={{ margin: "16px 0" }}>请检查网络连接，再试一次。</p>
+        <Button type="primary" onClick={() => window.location.reload()}>
+          重新加载
         </Button>
+      </main>
+    );
+  if (!state.targets.length && !state.currentTargetId)
+    return (
+      <div className="empty-workspace">
+        {contextHolder}
+        {header}
+        <OnboardingPage onStart={() => dispatch({ type: "OPEN_MODAL" })} />
+        <TargetModal
+          open={state.modalOpen}
+          target={state.editingTarget}
+          onClose={() => dispatch({ type: "CLOSE_MODAL" })}
+          onSave={handleSaveTarget}
+        />
       </div>
+    );
 
-      {/* Mobile Tab Bar */}
-      {isMobile && (
-        <div data-tour-id="mobile-tab-bar" style={{ padding: '6px 16px', borderBottom: '1px solid #e8e8e8', background: '#fff' }}>
-          <Segmented
-            block
-            value={mobileTab}
-            onChange={(val) => setMobileTab(val as 'chat' | 'ai')}
-            options={[
-              { label: '聊天', value: 'chat' },
-              { label: 'AI 辅助', value: 'ai' },
-            ]}
-          />
+  return (
+    <div className="app-shell">
+      {contextHolder}
+      <aside className="workspace-sidebar">
+        <Brand light />
+        <div className="sidebar-intro">
+          给每一段对话，
+          <br />
+          多一点理解。
         </div>
-      )}
-
-      {/* Main Layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Panel - AI Console */}
-        <div
-          className="flex-1 min-w-0 bg-white border-r border-border flex flex-col overflow-hidden"
-          data-tour-id="ai-panel"
-          style={isMobile ? { display: mobileTab === 'ai' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', borderRight: 'none' } : undefined}
-        >
-          <Toolbar
-            target={currentTarget}
-            onEditTarget={() => dispatch({ type: 'OPEN_MODAL', target: currentTarget })}
-            onAIAssist={() => { triggerAI(); if (isMobile) setMobileTab('ai'); }}
-            isGenerating={state.phase === 'generating' || state.isAnalyzing}
-            aiMode={aiMode}
-            session={state.sessions.find(s => s.id === state.currentSessionId) || null}
-            sessions={state.sessions}
-            onSelectSession={switchSession}
-            onCreateSession={createNewSession}
-            onDeleteSession={deleteSession}
-            onTriggerAnalysis={triggerAnalysis}
-            onOpenAnalysisModal={() => setAnalysisModalOpen(true)}
-            onOpenReviewModal={() => setReviewModalOpen(true)}
-            isAnalyzing={state.isAnalyzing}
-            analysisMode={state.analysisMode}
-            analysis={state.currentAnalysis}
-            activeDiagnosis={state.activeDiagnosis}
-            isDiagnosing={state.isDiagnosing}
-            onDiagnose={diagnoseTarget}
-            isMobile={isMobile}
-          />
-          <AttractionBar attraction={state.attraction} isMobile={isMobile} />
-
-          {/* Analysis step chain — visible in main panel during generation */}
-          {state.isAnalyzing && (
-            <Card size="small" style={{ margin: '8px 20px', borderLeft: '3px solid #3b5998' }}>
-              <div style={{ marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#3b5998' }}>
-                  {state.analysisMode === 'advisor' ? '军师分析中...' : '复盘总结中...'}
-                </span>
-              </div>
-              <AnalysisSteps currentStep={state.analysisStep} />
-            </Card>
-          )}
-
-          {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
-          <ErrorBoundary boundaryName="AI分析" fallback={(_err, retry) => (
-            <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
-              <div style={{ fontSize: 14, marginBottom: 8 }}>AI 分析区域加载失败</div>
-              <button onClick={retry} style={{ padding: '4px 16px', border: '1px solid #3b5998', borderRadius: 6, background: '#3b5998', color: '#fff', cursor: 'pointer', fontSize: 12 }}>重试</button>
-            </div>
-          )}>
-          <RoundTimeline
-            aiMessages={state.aiMessages}
-            replySelections={state.replySelections}
-            phase={state.phase}
-            currentAnalysis={state.currentAnalysis}
-            currentReplies={state.currentReplies}
-            isGenerating={state.phase === 'generating'}
-            generationStep={state.generationStep}
-            streamingText={state.streamingText}
-            favorabilityHistory={state.favorabilityHistory}
-            replyVersions={state.replyVersions}
-            activeVersionIndex={state.activeVersionIndex}
-            onSwitchVersion={(index) => dispatch({ type: 'SWITCH_VERSION', index })}
-            onSelectReply={(reply, aiMessageId) => selectReplyAction(reply, aiMessageId)}
-            onCustomReply={sendCustomReply}
-            onRegenerate={handleRegenerate}
-            onCancel={handleCancelGeneration}
-            onFeedback={handleFeedback}
-          />
-          </ErrorBoundary>
+        <div className="sidebar-section-label">
+          我的聊天对象{" "}
+          <span>{state.targets.length.toString().padStart(2, "0")}</span>
         </div>
-
-        {/* Right Panel - Chat Simulator */}
-        <div
-          className="w-[30%] max-w-105 flex flex-col bg-chat-bg"
-          style={isMobile ? { display: mobileTab === 'chat' ? 'flex' : 'none', flex: '1 1 100%', maxWidth: '100%', width: '100%' } : undefined}
-        >
-          <ChatHeader
-            targetName={currentTarget?.name || ''}
-            onReset={handleReset}
-            aiMode={aiMode}
-            onAiModeChange={setAiMode}
-            isMobile={isMobile}
-          />
-          <ErrorBoundary boundaryName="聊天记录" fallback={(_err, retry) => (
-            <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
-              <div style={{ fontSize: 14, marginBottom: 8 }}>聊天记录加载失败</div>
-              <button onClick={retry} style={{ padding: '4px 16px', border: '1px solid #3b5998', borderRadius: 6, background: '#3b5998', color: '#fff', cursor: 'pointer', fontSize: 12 }}>重试</button>
-            </div>
-          )}>
-          <ChatHistory
-            messages={state.messages}
-            targetName={currentTarget?.name || ''}
-            onEditMessage={handleEditMessage}
-            onDeleteMessage={handleDeleteMessage}
-            onAddScene={handleAddScene}
-            onImportMessages={handleImportMessages}
-          />
-          </ErrorBoundary>
-          {state.phase === 'her_sent' && (
-            <div
-              className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-primary bg-[#e8f0fe] border-t border-[#d0dff5] cursor-pointer"
-              onClick={() => {
-                triggerAI();
-                if (isMobile) setMobileTab('ai');
-              }}
+        <nav className="target-list" aria-label="聊天对象">
+          {state.targets.map((target, index) => (
+            <button
+              key={target.id}
+              className={`target-item ${target.id === state.currentTargetId ? "active" : ""}`}
+              aria-current={
+                target.id === state.currentTargetId ? "page" : undefined
+              }
+              onClick={() => void selectTarget(target.id)}
             >
-              <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-              <span>点击此处获取 AI 回复建议</span>
-            </div>
-          )}
-          <MessageInput
-            onSend={sendHerMessage}
-            disabled={state.phase === 'generating'}
-          />
+              <span className={`person-avatar avatar-${index % 3}`}>
+                {target.name.slice(0, 1)}
+              </span>
+              <span className="target-item-copy">
+                <strong>{target.name}</strong>
+                <small>{target.meet_scene || "一段新的对话"}</small>
+              </span>
+              <span className="target-active-dot" />
+            </button>
+          ))}
+        </nav>
+        <button
+          className="add-target"
+          onClick={() => dispatch({ type: "OPEN_MODAL" })}
+        >
+          <PlusOutlined /> 添加聊天对象
+        </button>
+        <div className="sidebar-note">
+          <span>✳</span>
+          <p>
+            好的回应，
+            <br />
+            从认真倾听开始。
+          </p>
+          <small>A LITTLE CLOSER, EVERY DAY.</small>
         </div>
-      </div>
+        <footer className="sidebar-footer">
+          <span className="sidebar-user">我</span>
+          <span>
+            我的对话空间<small>保持真诚，慢慢靠近</small>
+          </span>
+        </footer>
+      </aside>
+      <div className="workspace-main">
+        {header}
+        <div className="workspace-title">
+          <div>
+            <span className="eyebrow">MAKE ROOM FOR CONNECTION</span>
+            <h1>
+              把话说好，把心意送达<span>。</span>
+            </h1>
+          </div>
+          <div className="workspace-title-note">
+            <span className="context-dot" />
+            你的私人聊天工作室
+          </div>
+        </div>
+        <main className="workspace-panels">
+          <section
+            aria-label="聊天记录"
+            className={`conversation-panel ${isMobile && mobileTab !== "chat" ? "panel-hidden" : ""}`}
+          >
+            <ChatHeader
+              targetName={currentTarget?.name || ""}
+              onReset={handleReset}
+              aiMode={aiMode}
+              onAiModeChange={setAiMode}
+              isMobile={isMobile}
+            />
+            <ErrorBoundary
+              boundaryName="聊天记录"
+              fallback={(_err, retry) => (
+                <div
+                  style={{ padding: 24, textAlign: "center", color: "#666" }}
+                >
+                  <div style={{ fontSize: 14, marginBottom: 8 }}>
+                    聊天记录加载失败
+                  </div>
+                  <button
+                    onClick={retry}
+                    style={{
+                      padding: "4px 16px",
+                      border: "1px solid #285648",
+                      borderRadius: 6,
+                      background: "#285648",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    重试
+                  </button>
+                </div>
+              )}
+            >
+              <ChatHistory
+                isVisible={!isMobile || mobileTab === "chat"}
+                messages={state.messages}
+                targetId={state.currentTargetId || ""}
+                targetName={currentTarget?.name || ""}
+                onEditMessage={handleEditMessage}
+                onDeleteMessage={handleDeleteMessage}
+                onAddScene={handleAddScene}
+                onImportMessages={handleImportMessages}
+              />
+            </ErrorBoundary>
+            {state.phase === "her_sent" && (
+              <button
+                type="button"
+                className="assist-prompt"
+                onClick={() => {
+                  triggerAI();
+                  if (isMobile) setMobileTab("ai");
+                }}
+              >
+                <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                <span>为这条消息寻找回复灵感</span>
+                <ArrowRightOutlined />
+              </button>
+            )}
+            <MessageInput
+              onSend={sendHerMessage}
+              disabled={state.phase === "generating"}
+            />
+          </section>
+          <section
+            aria-label="AI 回复建议"
+            className={`inspiration-panel ${isMobile && mobileTab !== "ai" ? "panel-hidden" : ""}`}
+            data-tour-id="ai-panel"
+          >
+            <Toolbar
+              target={currentTarget}
+              onEditTarget={() =>
+                dispatch({ type: "OPEN_MODAL", target: currentTarget })
+              }
+              onAIAssist={() => {
+                triggerAI();
+                if (isMobile) setMobileTab("ai");
+              }}
+              isGenerating={state.phase === "generating" || state.isAnalyzing}
+              aiMode={aiMode}
+              session={
+                state.sessions.find((s) => s.id === state.currentSessionId) ||
+                null
+              }
+              sessions={state.sessions}
+              onSelectSession={switchSession}
+              onCreateSession={createNewSession}
+              onDeleteSession={deleteSession}
+              onTriggerAnalysis={triggerAnalysis}
+              onOpenAnalysisModal={() => setAnalysisModalOpen(true)}
+              onOpenReviewModal={() => setReviewModalOpen(true)}
+              isAnalyzing={state.isAnalyzing}
+              analysisMode={state.analysisMode}
+              analysis={state.currentAnalysis}
+              activeDiagnosis={state.activeDiagnosis}
+              isDiagnosing={state.isDiagnosing}
+              onDiagnose={diagnoseTarget}
+              isMobile={isMobile}
+            />
+            <AttractionBar attraction={state.attraction} isMobile={isMobile} />
 
+            {/* Analysis step chain — visible in main panel during generation */}
+            {state.isAnalyzing && (
+              <Card
+                size="small"
+                style={{ margin: "8px 20px", borderLeft: "3px solid #285648" }}
+              >
+                <div style={{ marginBottom: 6 }}>
+                  <span
+                    style={{ fontSize: 12, fontWeight: 600, color: "#285648" }}
+                  >
+                    {state.analysisMode === "advisor"
+                      ? "军师分析中..."
+                      : "复盘总结中..."}
+                  </span>
+                </div>
+                <AnalysisSteps currentStep={state.analysisStep} />
+              </Card>
+            )}
+
+            {/* RoundTimeline replaces AgentSteps + AnalysisTabs + ReplyPopup */}
+            <ErrorBoundary
+              boundaryName="AI分析"
+              fallback={(_err, retry) => (
+                <div
+                  style={{ padding: 24, textAlign: "center", color: "#666" }}
+                >
+                  <div style={{ fontSize: 14, marginBottom: 8 }}>
+                    AI 分析区域加载失败
+                  </div>
+                  <button
+                    onClick={retry}
+                    style={{
+                      padding: "4px 16px",
+                      border: "1px solid #285648",
+                      borderRadius: 6,
+                      background: "#285648",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    重试
+                  </button>
+                </div>
+              )}
+            >
+              <RoundTimeline
+                aiMessages={state.aiMessages}
+                replySelections={state.replySelections}
+                phase={state.phase}
+                currentAnalysis={state.currentAnalysis}
+                currentReplies={state.currentReplies}
+                isGenerating={state.phase === "generating"}
+                generationStep={state.generationStep}
+                streamingText={state.streamingText}
+                favorabilityHistory={state.favorabilityHistory}
+                replyVersions={state.replyVersions}
+                activeVersionIndex={state.activeVersionIndex}
+                onSwitchVersion={(index) =>
+                  dispatch({ type: "SWITCH_VERSION", index })
+                }
+                onSelectReply={async (reply, aiMessageId) => {
+                  await selectReplyAction(reply, aiMessageId);
+                  if (isMobile) setMobileTab("chat");
+                }}
+                onCustomReply={sendCustomReply}
+                onRegenerate={handleRegenerate}
+                onCancel={handleCancelGeneration}
+                onFeedback={handleFeedback}
+              />
+            </ErrorBoundary>
+          </section>
+        </main>
+        {isMobile && (
+          <nav
+            className="mobile-navigation"
+            aria-label="工作台导航"
+            data-tour-id="mobile-tab-bar"
+          >
+            <button
+              aria-current={mobileTab === "chat" ? "page" : undefined}
+              className={mobileTab === "chat" ? "active" : ""}
+              onClick={() => setMobileTab("chat")}
+            >
+              <MessageOutlined />
+              <span>聊天记录</span>
+            </button>
+            <button
+              aria-current={mobileTab === "ai" ? "page" : undefined}
+              className={mobileTab === "ai" ? "active" : ""}
+              onClick={() => setMobileTab("ai")}
+            >
+              <BulbOutlined />
+              <span>回复灵感</span>
+              {state.phase === "generating" && <i className="nav-working" />}
+            </button>
+            <button onClick={() => setAnalysisModalOpen(true)}>
+              <span aria-hidden="true">◎</span>
+              <span>关系诊断</span>
+            </button>
+          </nav>
+        )}
+      </div>
       {/* Modal */}
       <TargetModal
         open={state.modalOpen}
         target={state.editingTarget}
-        onClose={() => dispatch({ type: 'CLOSE_MODAL' })}
+        onClose={() => dispatch({ type: "CLOSE_MODAL" })}
         onSave={handleSaveTarget}
       />
 
@@ -413,12 +642,16 @@ function AppContent() {
       <AnalysisModal
         open={analysisModalOpen}
         onClose={() => setAnalysisModalOpen(false)}
-        targetName={currentTarget?.name || ''}
+        targetName={currentTarget?.name || ""}
         activeDiagnosis={state.activeDiagnosis}
         diagnosisHistory={state.diagnosisHistory}
         isDiagnosing={state.isDiagnosing}
         onDiagnose={diagnoseTarget}
-        advisorResult={state.analysisMode === 'advisor' ? state.analysisResult as any : null}
+        advisorResult={
+          state.analysisMode === "advisor"
+            ? (state.analysisResult as any)
+            : null
+        }
         isAnalyzing={state.isAnalyzing}
         analysisMode={state.analysisMode}
         onTriggerAnalysis={triggerAnalysis}
@@ -426,75 +659,113 @@ function AppContent() {
         onSelectHistory={(record) => {
           try {
             const parsed = JSON.parse(record.content);
-            dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
+            dispatch({
+              type: "VIEW_HISTORY_ANALYSIS",
+              analysisMode: record.msg_type,
+              data: parsed,
+            });
           } catch {}
         }}
       />
       <ReviewModal
         open={reviewModalOpen}
         onClose={() => setReviewModalOpen(false)}
-        targetName={currentTarget?.name || ''}
+        targetName={currentTarget?.name || ""}
         isAnalyzing={state.isAnalyzing}
         analysisMode={state.analysisMode}
         analysisStep={state.analysisStep}
         onTriggerReview={() => {
-          triggerAnalysis('review');
+          triggerAnalysis("review");
         }}
         history={state.analysisHistory}
         onSelectHistory={(record) => {
           try {
             const parsed = JSON.parse(record.content);
-            dispatch({ type: 'VIEW_HISTORY_ANALYSIS', analysisMode: record.msg_type, data: parsed });
+            dispatch({
+              type: "VIEW_HISTORY_ANALYSIS",
+              analysisMode: record.msg_type,
+              data: parsed,
+            });
           } catch {}
         }}
-        currentResult={state.analysisMode === 'review' ? state.analysisResult as any : null}
+        currentResult={
+          state.analysisMode === "review" ? (state.analysisResult as any) : null
+        }
       />
-    </>
+    </div>
   );
 }
 
 function App() {
-  const [authState, setAuthState] = useState<'loading' | 'setup' | 'login' | 'signup' | 'authenticated'>('loading');
+  const [authState, setAuthState] = useState<
+    "loading" | "setup" | "login" | "signup" | "authenticated"
+  >("loading");
 
   useEffect(() => {
-    api.getAuthStatus().then(({ initialized }) => {
-      if (!initialized) {
-        setAuthState('setup');
-        return;
-      }
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setAuthState('login');
-        return;
-      }
-      // Verify token by making an authenticated request
-      api.getTargets().then(() => setAuthState('authenticated')).catch(() => {
-        localStorage.removeItem('token');
-        setAuthState('login');
-      });
-    }).catch(() => setAuthState('login'));
+    api
+      .getAuthStatus()
+      .then(({ initialized }) => {
+        if (!initialized) {
+          setAuthState("setup");
+          return;
+        }
+        const token = localStorage.getItem("token");
+        if (!token) {
+          setAuthState("login");
+          return;
+        }
+        // Verify token by making an authenticated request
+        api
+          .getTargets()
+          .then(() => setAuthState("authenticated"))
+          .catch(() => {
+            localStorage.removeItem("token");
+            setAuthState("login");
+          });
+      })
+      .catch(() => setAuthState("login"));
   }, []);
 
-  if (authState === 'loading') {
+  if (authState === "loading") {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', gap: 16, padding: '40px 24px', maxWidth: 480, margin: '0 auto' }}>
-        <Skeleton active paragraph={{ rows: 1 }} title={{ width: '40%' }} />
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          padding: "40px 24px",
+          maxWidth: 480,
+          margin: "0 auto",
+        }}
+      >
+        <Skeleton active paragraph={{ rows: 1 }} title={{ width: "40%" }} />
         <Skeleton active paragraph={{ rows: 6 }} />
         <Skeleton.Button active block style={{ height: 48 }} />
       </div>
     );
   }
 
-  if (authState === 'setup') {
-    return <SetupPage onSuccess={() => setAuthState('authenticated')} />;
+  if (authState === "setup") {
+    return <SetupPage onSuccess={() => setAuthState("authenticated")} />;
   }
 
-  if (authState === 'login') {
-    return <LoginPage onSuccess={() => setAuthState('authenticated')} onSwitchToSignUp={() => setAuthState('signup')} />;
+  if (authState === "login") {
+    return (
+      <LoginPage
+        onSuccess={() => setAuthState("authenticated")}
+        onSwitchToSignUp={() => setAuthState("signup")}
+      />
+    );
   }
 
-  if (authState === 'signup') {
-    return <SignUpPage onSuccess={() => setAuthState('authenticated')} onSwitchToLogin={() => setAuthState('login')} />;
+  if (authState === "signup") {
+    return (
+      <SignUpPage
+        onSuccess={() => setAuthState("authenticated")}
+        onSwitchToLogin={() => setAuthState("login")}
+      />
+    );
   }
 
   return (

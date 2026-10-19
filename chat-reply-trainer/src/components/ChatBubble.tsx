@@ -83,7 +83,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
             </div>
             {(onEdit || onDelete) && (
               <div
-                className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-70 transition-opacity"
+                className="absolute -top-2 right-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-70 transition-opacity"
                 style={{ display: 'flex', gap: 2, zIndex: 10 }}
               >
                 {onEdit && (
@@ -109,16 +109,16 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
 
   // Her / Me messages
   return (
-    <div className={`flex gap-1.5 max-w-[85%] group ${isHer ? 'self-start' : 'self-end flex-row-reverse'}`}>
+    <div className={`chat-message flex gap-2 max-w-[92%] group ${isHer ? 'self-start' : 'self-end flex-row-reverse'}`}>
       <Avatar
         size={30}
-        style={{ backgroundColor: isHer ? '#f48fb1' : '#66bb6a', flexShrink: 0, fontSize: 12, borderRadius: 4 }}
+        style={{ backgroundColor: isHer ? '#cda793' : '#446c5c', flexShrink: 0, fontSize: 12, borderRadius: 4 }}
       >
         {isHer ? targetName.charAt(0) : '我'}
       </Avatar>
-      <div style={{ position: 'relative', maxWidth: '100%' }}>
+      <div style={{ position: 'relative', minWidth: 0, flex: 1 }}>
         {editing ? (
-          <div style={{ background: '#fff', border: '1px solid #3b5998', borderRadius: 10, padding: 8, minWidth: 200 }}>
+          <div style={{ background: '#fff', border: '1px solid #3b5998', borderRadius: 10, padding: 8, minWidth: 0 }}>
             <Input.TextArea value={editText} onChange={e => setEditText(e.target.value)} autoSize={{ minRows: 1, maxRows: 4 }} autoFocus
               onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); saveEdit(); } }} />
             <Space size={4} style={{ marginTop: 4, display: 'flex', justifyContent: 'flex-end' }}>
@@ -128,11 +128,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
           </div>
         ) : (
           <>
-            <div className={`rounded-xl px-2.5 py-2 text-[13px] leading-relaxed wrap-break-word ${isHer ? 'bg-white text-[#1a1a1a] rounded-tl-sm' : 'bg-wechat-green text-[#1a1a1a] rounded-tr-sm'}`}>
+            <div className={`message-bubble rounded-xl px-2.5 py-2 text-[13px] leading-relaxed wrap-break-word ${isHer ? 'bg-white text-[#1a1a1a] rounded-tl-sm' : 'bg-wechat-green text-[#1a1a1a] rounded-tr-sm'}`}>
               {message.text}
             </div>
             {(onEdit || onDelete) && (
-              <div className="absolute -top-2 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-70 transition-opacity" style={{ [isHer ? 'right' : 'left']: 0, display: 'flex', gap: 2, zIndex: 10 }}>
+              <div className="absolute -top-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-70 transition-opacity" style={{ [isHer ? 'right' : 'left']: 0, display: 'flex', gap: 2, zIndex: 10 }}>
                 {onEdit && (
                   <Button type="text" size="small" icon={<EditOutlined />}
                     aria-label="编辑消息"
@@ -150,7 +150,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(({ message, targetName,
             )}
           </>
         )}
-        <div className={`text-[11px] text-[#bbb] mt-0.5 ${isHer ? 'text-left' : 'text-right'}`}>
+        <div className={`text-[11px] text-[#798278] mt-0.5 ${isHer ? 'text-left' : 'text-right'}`}>
           {renderSource()}
         </div>
       </div>

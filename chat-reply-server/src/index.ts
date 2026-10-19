@@ -568,12 +568,14 @@ app.post('/api/sessions/:sessionId/generate', async (req: any, res: Response) =>
         }
       }
     } catch (streamErr: any) {
-      // 模型欠费：不可恢复，直接下发错误并结束（其余流错误静默，走兜底）
+      // 模型欠费：不可恢复，直接下发明确错误并结束。
       if (isLLMBillingError(streamErr)) {
         send('error', { message: streamErr.message, code: 'BILLING' });
         res.end();
         return;
       }
+      // 网络、鉴权、模型名等错误不能伪装成 JSON 解析失败或安全回复。
+      throw streamErr;
     }
 
     if (!isQuick) send('step', { step: 'parsing' });
@@ -849,6 +851,7 @@ app.post('/api/sessions/:sessionId/regenerate', async (req: any, res: Response) 
         res.end();
         return;
       }
+      throw streamErr;
     }
 
     if (!isQuick) send('step', { step: 'parsing' });
@@ -963,6 +966,7 @@ app.post('/api/targets/:targetId/diagnose', async (req: any, res: Response) => {
         res.end();
         return;
       }
+      throw streamErr;
     }
 
     send('step', { step: 'parsing' });
@@ -1288,6 +1292,7 @@ app.post('/api/sessions/:sessionId/analyze', async (req: any, res: Response) => 
         res.end();
         return;
       }
+      throw streamErr;
     }
 
     // Parse response

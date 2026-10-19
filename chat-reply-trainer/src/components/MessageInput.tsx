@@ -1,59 +1,67 @@
-import React, { useState, useRef } from 'react';
-import { Input, Button } from 'antd';
-import { SendOutlined } from '@ant-design/icons';
-
-const { TextArea } = Input;
-
-interface MessageInputProps {
-  onSend: (text: string) => void;
+import { useState } from "react";
+import { Input, Button } from "antd";
+import { ArrowUpOutlined } from "@ant-design/icons";
+export default function MessageInput({
+  onSend,
+  disabled,
+  placeholder,
+}: {
+  onSend: (text: string) => void | Promise<void>;
   disabled: boolean;
   placeholder?: string;
-}
-
-const MessageInput: React.FC<MessageInputProps> = ({ onSend, disabled, placeholder }) => {
-  const [text, setText] = useState('');
-  const sendingRef = useRef(false);
-
-  const handleSend = () => {
-    const trimmed = text.trim();
-    if (!trimmed || disabled || sendingRef.current) return;
-    sendingRef.current = true;
-    onSend(trimmed);
-    setText('');
-    // Prevent rapid re-trigger for 300ms
-    setTimeout(() => { sendingRef.current = false; }, 300);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+}) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const send = async () => {
+    const value = text.trim();
+    if (!value || disabled || sending) return;
+    setSending(true);
+    try {
+      await onSend(value);
+      setText("");
+    } catch {
+      /* The parent displays the error; preserve the draft. */
+    } finally {
+      setSending(false);
     }
   };
-
-  const canSend = !disabled && text.trim().length > 0;
-
   return (
-    <div data-tour-id="message-input" style={{ background: '#f7f7f7', borderTop: '1px solid #e0e0e0', padding: 8, display: 'flex', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
-      <TextArea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder || '输入她刚发的消息...'}
-        disabled={disabled}
-        autoSize={{ minRows: 1, maxRows: 3 }}
-        style={{ flex: 1 }}
-      />
-      <Button
-        type="primary"
-        icon={<SendOutlined />}
-        disabled={!canSend}
-        onClick={handleSend}
-      >
-        发送
-      </Button>
+    <div className="composer" data-tour-id="message-input">
+      <label htmlFor="incoming-message">对方刚刚说了什么？</label>
+      <div className="composer-field">
+        <Input.TextArea
+          id="incoming-message"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing &&
+              e.nativeEvent.keyCode !== 229 &&
+              !window.matchMedia("(pointer: coarse)").matches
+            ) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          placeholder={placeholder || "输入对方的消息…"}
+          disabled={disabled || sending}
+          autoSize={{ minRows: 2, maxRows: 5 }}
+        />
+        <Button
+          type="primary"
+          aria-label="添加对方的消息"
+          icon={<ArrowUpOutlined />}
+          disabled={!text.trim() || disabled}
+          loading={sending}
+          onClick={() => void send()}
+        />
+      </div>
+      <div className="composer-foot">
+        <span>只记录在这里，不会发送给对方</span>
+        <span className="keyboard-hint">Enter 添加 · Shift + Enter 换行</span>
+      </div>
     </div>
   );
-};
-
-export default MessageInput;
+}
